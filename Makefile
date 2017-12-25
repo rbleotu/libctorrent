@@ -1,7 +1,7 @@
 ######## PROJECT FILES ########
 SRC_DIR ::= ./src
 OBJ_DIR ::= ./obj
-SRC ::= crypt/sha1.c main.c
+SRC ::= crypt/sha1.c
 
 VPATH ::= $(SRC_DIR)
 OBJ ::=  $(patsubst %.c, $(OBJ_DIR)/%.o, $(notdir $(SRC)))
@@ -10,7 +10,7 @@ TARGET ::= a.out
 CC ?= gcc
 CFLAGS ::= -Wall -Wextra -Wpedantic -std=c99\
 	-Wno-unused-variable -Wno-unused-parameter\
-	-I$(SRC_DIR)
+	-Wno-unused-function -I$(SRC_DIR)
 ########     RULES     ########
 .PHONY: all debug test clean
 
