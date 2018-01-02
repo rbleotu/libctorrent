@@ -56,7 +56,7 @@ local int
 bstring_cmp(const struct bstring *a, const uint8_t *str, size_t len)
 {
     size_t m = MIN(a->len, len);
-    return memcmp(a->content, str, len);
+    return memcmp(a->content, str, m);
 }
 
 local BT_BCode
@@ -68,8 +68,8 @@ bdict_get(BT_BDict dict, const uint8_t *str, size_t len)
         size_t mid = lt + (rt - lt) / 2;
         int cmp = bstring_cmp(B_STRING(v[mid][0]), str, len);
         if (cmp == 0)
-            return dict->base[mid + 1];
-        else if (cmp > 0)
+            return v[mid][1];
+        else if (cmp < 0)
             lt = mid + 1;
         else
             rt = mid;
