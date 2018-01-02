@@ -53,20 +53,20 @@ blist_get(BT_BList lst, size_t i)
 }
 
 local int
-bstring_cmp(const struct bstring *a, const struct bstring *b)
+bstring_cmp(const struct bstring *a, const uint8_t *str, size_t len)
 {
-    size_t m = MIN(a->len, b->len);
-    return memcmp(a->content, b->content, m);
+    size_t m = MIN(a->len, len);
+    return memcmp(a->content, str, len);
 }
 
 local BT_BCode
-bdict_get(BT_BDict dict, BT_BString s)
+bdict_get(BT_BDict dict, const uint8_t *str, size_t len)
 {
     BT_BCode(*v)[2] = (void *)dict->base;
     size_t lt = 0, rt = dict->n / 2;
     while (lt < rt) {
         size_t mid = lt + (rt - lt) / 2;
-        int cmp = bstring_cmp(B_STRING(v[mid][0]), s);
+        int cmp = bstring_cmp(B_STRING(v[mid][0]), str, len);
         if (cmp == 0)
             return dict->base[mid + 1];
         else if (cmp > 0)
@@ -264,7 +264,6 @@ parse_dict(BT_BParser ctx)
         dict->base[n++] = (BT_BCode){BCODE_STRING,
                                      {.string = parse_string(ctx)}};
         dict->base[n++] = parse(ctx);
-        // bt_bcode_fprint(stdout, dict->base[n - 1]);
         if (n >= sz) {
             if (barray_resize(&dict, sz <<= 1) < 0)
                 throw_error(ctx, BT_ESYNTAX);
@@ -452,12 +451,15 @@ bt_bcode_get(BT_BCode b, ...)
     case BCODE_LIST:
         return blist_get(B_LIST(b), va_arg(ap, int));
     case BCODE_DICT: {
-        // uint8_t *str = va_arg(ap, uint8_t *);
-        // size_t len = va_arg(ap, size_t);
-        // return bdict_get(B_DICT(b), str, len);
+        uint8_t *str = va_arg(ap, uint8_t *);
+        size_t len = strlen((char *)str);
+        return bdict_get(B_DICT(b), str, len);
     }
+    default:
+        assert(0);
     }
     va_end(ap);
+    return (BT_BCode){.id = BCODE_NONE};
 }
 
 typedef struct bencoder *BEncoder;
@@ -495,20 +497,20 @@ bt_bencode(uint8_t dest[], size_t len, BT_BCode *b)
     return 0;
 }
 
-int
-main(int argc, char *argv[])
-{
-    FILE *f = freopen(argv[1], "rb", stdin);
-    if (!f) {
-        fprintf(stderr, "Failed to open '%s' : %s\n", argv[1],
-                strerror(errno));
-        return 1;
-    }
-    BT_BCode b;
-    if (bt_bdecode_file(&b, f) < 0) {
-        fprintf(stderr, "Error decoding: %s\n", bt_strerror());
-        return 1;
-    }
-    bt_bcode_fprint(stdout, b);
-    return 0;
-}
+// int
+// main(int argc, char *argv[])
+//{
+//    FILE *f = freopen(argv[1], "rb", stdin);
+//    if (!f) {
+//        fprintf(stderr, "Failed to open '%s' : %s\n", argv[1],
+//                strerror(errno));
+//        return 1;
+//    }
+//    BT_BCode b;
+//    if (bt_bdecode_file(&b, f) < 0) {
+//        fprintf(stderr, "Error decoding: %s\n", bt_strerror());
+//        return 1;
+//    }
+//    bt_bcode_fprint(stdout, b);
+//    return 0;
+//}

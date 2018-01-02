@@ -21,10 +21,10 @@ typedef struct barray *BT_BList;
 typedef struct barray *BT_BDict;
 typedef struct bstring *BT_BString;
 
-#define B_ISNIL(b) ((b).type == BCODE_NONE)
-#define B_ISSTRING(b) ((b).type == BCODE_STRING)
-#define B_ISLIST(b) ((b).type == BCODE_LIST)
-#define B_ISDICT(b) ((b).type == BCODE_DICT)
+#define B_ISNIL(b) ((b).id == BCODE_NONE)
+#define B_ISSTRING(b) ((b).id == BCODE_STRING)
+#define B_ISLIST(b) ((b).id == BCODE_LIST)
+#define B_ISDICT(b) ((b).id == BCODE_DICT)
 
 #define B_NUM(x) ((x).u.num)
 #define B_STRING(x) ((x).u.string)

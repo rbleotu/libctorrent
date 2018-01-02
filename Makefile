@@ -1,7 +1,7 @@
 ######## PROJECT FILES ########
 SRC_DIR ::= ./src
 OBJ_DIR ::= ./obj
-SRC ::= crypt/sha1.c bcode/bcode.c error.c main.c
+SRC ::= crypt/sha1.c bcode/bcode.c torrent.c error.c main.c
 
 VPATH ::= $(SRC_DIR)
 OBJ ::=  $(patsubst %.c, $(OBJ_DIR)/%.o, $(notdir $(SRC)))
