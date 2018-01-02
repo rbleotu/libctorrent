@@ -9,44 +9,36 @@
 #include <stdarg.h>
 
 #include "../error.h"
-#include "../common.h"
 #include "bcode.h"
 
-enum BCODE_ERR {
-    B_ENONE,
-    B_EREAD,
-    B_EALLOC,
-    B_ESYNTAX,
-    B_EOVERFLOW,
+typedef struct barray *BArray;
 
-    B_ERR_CNT
-};
-
-struct t_bstring {
+struct bstring {
     size_t len;
     uint8_t content[];
 };
 
-struct t_barray {
+struct barray {
     size_t n, cap;
-    T_BCode base[];
+    BT_BCode base[];
 };
 
-static T_BArray
-t_barray_new(size_t cap)
+local BArray
+barray_new(size_t cap)
 {
-    T_BArray arr = t_malloc(sizeof(*arr) + sizeof(T_BCode[cap]));
+    BArray arr = bt_malloc(sizeof(*arr) + sizeof(BT_BCode[cap]));
     if (!arr)
         return NULL;
-    *arr = (struct t_barray){0, cap};
+    *arr = (struct barray){0, cap};
     return arr;
 }
 
-static int
-t_barray_resize(T_BArray *arr, size_t newsz)
+local int
+barray_resize(BArray *arr, size_t newsz)
 {
     assert(arr);
-    T_BArray tmp = realloc(*arr, sizeof(*tmp) + sizeof(T_BCode[newsz]));
+    BArray tmp =
+            realloc(*arr, sizeof(*tmp) + sizeof(BT_BCode[newsz]));
     if (!tmp)
         return -1;
     tmp->cap = newsz;
@@ -54,21 +46,27 @@ t_barray_resize(T_BArray *arr, size_t newsz)
     return 0;
 }
 
-static T_BCode
-t_blist_get(T_BList lst, size_t i)
+local BT_BCode
+blist_get(BT_BList lst, size_t i)
 {
     return lst->base[i];
 }
 
-static T_BCode
-t_bdict_get(T_BDict dict, uint8_t *str, size_t len)
+local int
+bstring_cmp(const struct bstring *a, const struct bstring *b)
 {
-    T_BCode(*v)[2] = (void *)dict->base;
+    size_t m = MIN(a->len, b->len);
+    return memcmp(a->content, b->content, m);
+}
+
+local BT_BCode
+bdict_get(BT_BDict dict, BT_BString s)
+{
+    BT_BCode(*v)[2] = (void *)dict->base;
     size_t lt = 0, rt = dict->n / 2;
     while (lt < rt) {
         size_t mid = lt + (rt - lt) / 2;
-        int cmp = memcmp(str, B_STR(v[mid][0])->content,
-                         MIN(len, B_STR(v[mid][0])->len));
+        int cmp = bstring_cmp(B_STRING(v[mid][0]), s);
         if (cmp == 0)
             return dict->base[mid + 1];
         else if (cmp > 0)
@@ -76,13 +74,13 @@ t_bdict_get(T_BDict dict, uint8_t *str, size_t len)
         else
             rt = mid;
     }
-    return (T_BCode){BCODE_NONE};
+    return (BT_BCode){BCODE_NONE};
 }
 
 #define BUF_SZ (1 << 16)
 #define PUSHBACK_SZ (1 << 4)
 
-typedef struct t_bparser *T_BParser;
+typedef struct t_bparser *BT_BParser;
 
 struct t_bparser {
     FILE *fin;
@@ -95,50 +93,31 @@ struct t_bparser {
     jmp_buf env;
 };
 
-static __attribute__((noreturn)) void
-throw_error(T_BParser ctx, int err)
+local __attribute__((noreturn)) void
+throw_error(BT_BParser ctx, int err)
 {
-    switch (err) {
-    case B_ENONE:
-        t_eprintf(0, "success\n");
-        break;
-    case B_EREAD:
-        t_eprintf(T_EBCODE, "error reading bcoded file\n");
-        break;
-    case B_EALLOC:
-        t_eprintf(T_EBCODE, "error allocating memory\n");
-        break;
-    case B_ESYNTAX:
-        t_eprintf(T_EBCODE, "syntax error\n");
-        break;
-    case B_EOVERFLOW:
-        t_eprintf(T_EBCODE, "integer overflow\n");
-        break;
-    default:
-        assert("bad error code\n" && 0);
-    }
+    bt_errno = err;
     longjmp(ctx->env, err);
 }
 
-
-static size_t
-sc_refill_buffer(T_BParser ctx)
+local size_t
+sc_refill_buffer(BT_BParser ctx)
 {
     if (!ctx->fin)
         return 0;
     size_t xfer = fread(ctx->buf, 1, BUF_SZ, ctx->fin);
     if (!xfer) {
         if (ferror(ctx->fin))
-            throw_error(ctx, B_EREAD);
+            throw_error(ctx, BT_EREAD);
         return 0;
     }
-    ctx->pend = ctx->buf;
+    ctx->pnext = ctx->buf;
     ctx->pend = ctx->buf + xfer;
     return xfer;
 }
 
-static int
-sc_get(T_BParser ctx)
+local int
+sc_get(BT_BParser ctx)
 {
     if (ctx->pushed)
         return ctx->pushback[--ctx->pushed];
@@ -151,159 +130,184 @@ sc_get(T_BParser ctx)
     return *ctx->pnext++;
 }
 
-static inline void
-sc_unget(T_BParser ctx, int ch)
+local inline void
+sc_unget(BT_BParser ctx, int ch)
 {
     assert(ctx->pushed < PUSHBACK_SZ);
 
     ctx->pushback[ctx->pushed++] = ch;
 }
 
-#define EXPECT(ctx, c)                     \
-    do {                                   \
-        int tmp_ = sc_get(ctx);            \
-        if (tmp_ != c)                     \
-            throw_error((ctx), B_ESYNTAX); \
+#define EXPECT(ctx, c)                      \
+    do {                                    \
+        int tmp_ = sc_get(ctx);             \
+        if (tmp_ != c)                      \
+            throw_error((ctx), BT_ESYNTAX); \
     } while (0)
 
-static T_BInt
-sc_read_num(T_BParser ctx)
+local BT_BInt
+sc_read_num(BT_BParser ctx)
 {
-    int c;
-    T_BInt x = 0;
-    while (isdigit(c = sc_get(ctx)))
-        x = 10 * x + (c - '0');
+    BT_BInt x = 0;
+    int neg = 0, c;
+    if ((c = sc_get(ctx)) == '0')
+        return 0;
+    if (c == '-') {
+        neg = 1;
+        c = sc_get(ctx);
+    }
+    if (!isdigit(c))
+        throw_error(ctx, BT_ESYNTAX);
+    do {
+        BT_BInt tmp = ((BT_BInt)10) * x + (BT_BInt)(c - '0');
+        if (tmp < x)
+            throw_error(ctx, BT_EOVERFLOW);
+        x = tmp;
+    } while (isdigit(c = sc_get(ctx)));
+    if (neg)
+        x = -x;
     sc_unget(ctx, c);
     return x;
 }
 
-static T_BString
+local BT_BString
 t_bstring_new(size_t len)
 {
-    T_BString str = t_malloc(sizeof(*str) + len);
+    BT_BString str = bt_malloc(sizeof(*str) + len);
     if (!str)
         return NULL;
     str->len = len;
     return str;
 }
 
-static int
-sc_read_string(T_BParser ctx, uint8_t dest[], size_t len)
+local int
+sc_read_string(BT_BParser ctx, uint8_t dest[], size_t len)
 {
+#ifdef BT_DEBUG
+    while (len--) {
+        int c = sc_get(ctx);
+        if (c == EOF)
+            return -1;
+        *dest++ = c;
+    }
+#else
+    assert(ctx->pushed == 0);
     size_t have;
     have = ctx->pend - ctx->pnext;
     have = MIN(len, have);
     memcpy(dest, ctx->pnext, have);
 
-    while (len -= have) {
+    while (dest += have, len -= have) {
         have = sc_refill_buffer(ctx);
         have = MIN(len, have);
         if (!have)
             return -1;
         memcpy(dest, ctx->buf, have);
     }
-
     ctx->pnext += have;
+#endif
     return 0;
 }
 
-static T_BString
-parse_string(T_BParser ctx)
+local BT_BString
+parse_string(BT_BParser ctx)
 {
-    T_BInt len = sc_read_num(ctx);
-    if (!len)
-        throw_error(ctx, B_ESYNTAX);
+    BT_BInt len = sc_read_num(ctx);
     EXPECT(ctx, ':');
-    T_BString ret = t_bstring_new(len);
+    BT_BString ret = t_bstring_new(len);
     if (!ret)
-        throw_error(ctx, B_EALLOC);
+        throw_error(ctx, BT_EALLOC);
     int s = sc_read_string(ctx, ret->content, len);
     if (s < 0)
-        throw_error(ctx, B_ESYNTAX);
+        throw_error(ctx, BT_ESYNTAX);
     return ret;
 }
 
-static T_BCode
-parse(T_BParser ctx);
+local BT_BCode
+parse(BT_BParser ctx);
 
-static T_BList
-parse_list(T_BParser ctx)
+local BT_BList
+parse_list(BT_BParser ctx)
 {
-#define INIT_SZ 8
-    T_BList lst = t_barray_new(INIT_SZ);
+#define INIBT_SZ 8
+    BT_BList lst = barray_new(INIBT_SZ);
     if (!lst)
-        throw_error(ctx, B_EALLOC);
-    size_t n = 0, sz = INIT_SZ;
+        throw_error(ctx, BT_EALLOC);
+    size_t n = 0, sz = INIBT_SZ;
     for (int c; (c = sc_get(ctx)) != 'e';) {
         if (c == EOF)
-            throw_error(ctx, B_ESYNTAX);
+            throw_error(ctx, BT_EEOF);
         sc_unget(ctx, c);
         lst->base[n++] = parse(ctx);
         if (n >= sz) {
-            sz <<= 1;
-            if (t_barray_resize(&lst, sz) < 0)
-                throw_error(ctx, B_ESYNTAX);
+            if (barray_resize(&lst, sz <<= 1) < 0)
+                throw_error(ctx, BT_ESYNTAX);
         }
     }
     lst->n = n;
+    barray_resize(&lst, n);
     return lst;
 }
 
-static T_BDict
-parse_dict(T_BParser ctx)
+local BT_BDict
+parse_dict(BT_BParser ctx)
 {
-    T_BDict dict = t_barray_new(INIT_SZ);
+    BT_BDict dict = barray_new(INIBT_SZ);
     if (!dict)
-        throw_error(ctx, B_EALLOC);
-    size_t n = 0, sz = INIT_SZ;
+        throw_error(ctx, BT_EALLOC);
+    size_t n = 0, sz = INIBT_SZ;
     for (int c; (c = sc_get(ctx)) != 'e';) {
-        if (c == EOF)
-            throw_error(ctx, B_ESYNTAX);
+        if (c == EOF) {
+            throw_error(ctx, BT_EEOF);
+        }
         sc_unget(ctx, c);
-        dict->base[n++] = (T_BCode){BCODE_STRING, {.str = parse_string(ctx)}};
+        dict->base[n++] = (BT_BCode){BCODE_STRING,
+                                     {.string = parse_string(ctx)}};
         dict->base[n++] = parse(ctx);
+        // bt_bcode_fprint(stdout, dict->base[n - 1]);
         if (n >= sz) {
-            sz <<= 1;
-            if (t_barray_resize(&dict, sz) < 0)
-                throw_error(ctx, B_ESYNTAX);
+            if (barray_resize(&dict, sz <<= 1) < 0)
+                throw_error(ctx, BT_ESYNTAX);
         }
     }
     dict->n = n;
+    barray_resize(&dict, n);
     return dict;
 }
 
-static T_BCode
-parse(T_BParser ctx)
+local BT_BCode
+parse(BT_BParser ctx)
 {
     assert(ctx);
-    T_BCode ret = {BCODE_NONE};
+    BT_BCode ret = {BCODE_NONE};
 
     int c = sc_get(ctx);
 
     /* clang-format off */
     switch (c) {
     case 'i':
-        ret.type = BCODE_INT;
+        ret.id = BCODE_INT;
         B_NUM(ret) = sc_read_num(ctx);
         EXPECT(ctx, 'e');
         break;
     case 'l':
-        ret.type = BCODE_LIST;
-        B_LST(ret) = parse_list(ctx);
+        ret.id= BCODE_LIST;
+        B_LIST(ret) = parse_list(ctx);
         break;
     case 'd':
-        ret.type = BCODE_DICT;
+        ret.id = BCODE_DICT;
         B_DICT(ret) = parse_dict(ctx);
         break;
+    case '0':
     case '1': case '2': case '3':
     case '4': case '5': case '6':
     case '7': case '8': case '9':
         sc_unget(ctx, c);
-        ret.type = BCODE_STRING;
-        B_STR(ret) = parse_string(ctx);
+        ret.id = BCODE_STRING;
+        B_STRING(ret) = parse_string(ctx);
         break;
     default:
-        throw_error(ctx, B_ESYNTAX);
+        throw_error(ctx, BT_ESYNTAX);
     }
     /* clang-format on */
 
@@ -311,11 +315,12 @@ parse(T_BParser ctx)
 }
 
 extern int
-t_bdecode_file(FILE *f, T_BCode *res)
+bt_bdecode_file(BT_BCode *res, FILE *f)
 {
     assert(res);
 
-    struct t_bparser ctx = {.fin = f, .pnext = ctx.buf, .pend = ctx.buf};
+    struct t_bparser ctx = {
+            .fin = f, .pnext = ctx.buf, .pend = ctx.buf};
     if (setjmp(ctx.env))
         return -1;
     *res = parse(&ctx);
@@ -323,9 +328,10 @@ t_bdecode_file(FILE *f, T_BCode *res)
 }
 
 extern int
-t_bdecode_str(const uint8_t *str, size_t len, T_BCode *res)
+bt_bdecode_str(BT_BCode *res, const u8 *str, size_t len)
 {
-    struct t_bparser ctx = {.fin = NULL, .pnext = str, .pend = str + len};
+    struct t_bparser ctx = {
+            .fin = NULL, .pnext = str, .pend = str + len};
     if (setjmp(ctx.env))
         return -1;
     *res = parse(&ctx);
@@ -333,63 +339,176 @@ t_bdecode_str(const uint8_t *str, size_t len, T_BCode *res)
 }
 
 extern int
-t_bencode_file(FILE *f, T_BCode b)
+bt_bencode_file(FILE *f, BT_BCode b)
 {
     return 0;
 }
 
-extern void
-t_bcode_fprint(FILE *f, T_BCode b)
+local void
+add_indent(FILE *f, unsigned indent)
 {
-    switch (b.type) {
+#if !__STRICT_ANSI__
+    static const char buf[] = {[0 ...(1 << 9)] = ' '};
+#else
+    static const char buf[] = {
+            ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ',
+            ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ',
+            ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ',
+            ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ',
+            ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ',
+            ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ',
+            ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ',
+            ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ',
+            ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ',
+            ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ',
+            ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ',
+            ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ',
+            ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ',
+            ' '};
+#endif
+    while (indent > sizeof(buf)) {
+        fwrite(buf, sizeof(buf), 1, f);
+        indent -= sizeof(buf);
+    }
+    fwrite(buf, indent, 1, f);
+}
+
+local void
+bstring_fprint(FILE *f, BT_BString s)
+{
+    fputc('"', f);
+    size_t len = s->len;
+    uint8_t *data = s->content;
+    for (; len--; data++) {
+        if (*data == '"' || *data == '\\')
+            fprintf(f, "\\%c", (char)*data);
+        else if (isprint(*data))
+            fputc(*data, f);
+        else
+            fprintf(f, "\\x%02x", (int)*data);
+    }
+    fputc('"', f);
+}
+
+#define INDENT_LVL 4
+
+local void
+bcode_fprint(FILE *f, BT_BCode b, unsigned indent)
+{
+    switch (b.id) {
     case BCODE_INT:
         fprintf(f, "%ld", B_NUM(b));
         break;
     case BCODE_STRING:
-        fputc('"', f);
-        fwrite(B_STR(b)->content, 1, B_STR(b)->len, f);
-        fputc('"', f);
+        bstring_fprint(f, B_STRING(b));
         break;
     case BCODE_LIST:
         fputc('[', f);
-        for (size_t i = 0; i < B_LST(b)->n; i++) {
-            t_bcode_fprint(f, B_LST(b)->base[i]);
-            if (i + 1 < B_LST(b)->n)
-                fputc(',', f);
+        for (size_t i = 0; i < B_LIST(b)->n; i++) {
+            if (i)
+                add_indent(f, indent + INDENT_LVL);
+            bcode_fprint(f, B_LIST(b)->base[i],
+                         i ? indent + INDENT_LVL : 1);
+            if (i + 1 < B_LIST(b)->n)
+                fputs(",\n", f);
         }
         fputc(']', f);
         break;
     case BCODE_DICT:
         fputc('{', f);
         for (size_t i = 0; i < B_DICT(b)->n; i += 2) {
-            t_bcode_fprint(f, B_DICT(b)->base[i]);
+            if (i)
+                add_indent(f, indent + INDENT_LVL);
+            bcode_fprint(f, B_DICT(b)->base[i],
+                         i ? indent + INDENT_LVL : 1);
             fputc(':', f);
-            t_bcode_fprint(f, B_DICT(b)->base[i + 1]);
+            bcode_fprint(f, B_DICT(b)->base[i + 1],
+                         indent + INDENT_LVL);
             if (i + 2 < B_DICT(b)->n)
-                fputc(',', f);
+                fputs(",\n", f);
         }
         fputc('}', f);
         break;
     }
 }
 
-static T_BCode
-t_bcode_get(T_BCode b, ...)
+extern void
+bt_bcode_fprint(FILE *f, BT_BCode b)
+{
+    bcode_fprint(f, b, 0);
+    fputc('\n', f);
+}
+
+extern BT_BCode
+bt_bcode_get(BT_BCode b, ...)
 {
     va_list ap;
     va_start(ap, b);
-    switch (b.type) {
+    switch (b.id) {
     case BCODE_INT:
     case BCODE_STRING:
         return b;
         break;
     case BCODE_LIST:
-        return t_blist_get(B_LST(b), va_arg(ap, int));
+        return blist_get(B_LIST(b), va_arg(ap, int));
     case BCODE_DICT: {
-        uint8_t *str = va_arg(ap, uint8_t *);
-        size_t len = va_arg(ap, size_t);
-        return t_bdict_get(B_DICT(b), str, len);
+        // uint8_t *str = va_arg(ap, uint8_t *);
+        // size_t len = va_arg(ap, size_t);
+        // return bdict_get(B_DICT(b), str, len);
     }
     }
     va_end(ap);
+}
+
+typedef struct bencoder *BEncoder;
+
+struct bencoder {
+    uint8_t *dest;
+    size_t rem;
+};
+
+local size_t
+benc_printf(BEncoder ctx, const char *fmt, ...)
+{
+    va_list ap;
+    size_t len;
+    va_start(ap, fmt);
+    len = vsnprintf((char *)ctx->dest, ctx->rem, fmt, ap) - 1;
+    va_end(ap);
+    ctx->rem -= MIN(len, ctx->rem);
+    ctx->dest += len;
+    return len;
+}
+
+extern size_t
+bt_bencode(uint8_t dest[], size_t len, BT_BCode *b)
+{
+    // struct bencoder ctx = {.dest = dest, .rem = len};
+    // switch (b.id) {
+    // case BCODE_INT: {
+    //    return snprintf((char *)dest, len, "i%lde", B_NUM(b));
+    //} break;
+    // case BCODE_STRING: {
+    //    return snprintf((char *)dest, len, "%zu:"
+    //}
+    //}
+    return 0;
+}
+
+int
+main(int argc, char *argv[])
+{
+    FILE *f = freopen(argv[1], "rb", stdin);
+    if (!f) {
+        fprintf(stderr, "Failed to open '%s' : %s\n", argv[1],
+                strerror(errno));
+        return 1;
+    }
+    BT_BCode b;
+    if (bt_bdecode_file(&b, f) < 0) {
+        fprintf(stderr, "Error decoding: %s\n", bt_strerror());
+        return 1;
+    }
+    bt_bcode_fprint(stdout, b);
+    return 0;
 }
