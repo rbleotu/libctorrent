@@ -138,8 +138,8 @@ bt_torrent_new(FILE *f, const char *outdir)
             goto cleanup;
     }
 
-    if (bt_disk_check(t->t->piecetab, t->npieces) < 0)
-        goto cleanup;
+    // if (bt_disk_check(t->pieces, t->npieces) < 0)
+    //    goto cleanup;
 
     return t;
 

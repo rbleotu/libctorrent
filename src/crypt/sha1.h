@@ -3,7 +3,7 @@
 
 #define SHA1_DIGEST_LEN 20
 
-extern void
-t_sha1(uint8_t digest[], const uint8_t msg[], size_t len);
+void
+bt_sha1(uint8_t digest[], const uint8_t msg[], size_t len);
 
 #endif

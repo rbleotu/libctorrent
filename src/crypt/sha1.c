@@ -71,9 +71,9 @@ sha1_round(uint32_t h[], const uint8_t *chunk)
 
 #define S(a, n) (lt_rot((a), (n)))
 
-#define R(t)                                                             \
-    (temp = W[(t - 3) & 0x0F] ^ W[(t - 8) & 0x0F] ^ W[(t - 14) & 0x0F] ^ \
-            W[t & 0x0F],                                                 \
+#define R(t)                                        \
+    (temp = W[(t - 3) & 0x0F] ^ W[(t - 8) & 0x0F] ^ \
+            W[(t - 14) & 0x0F] ^ W[t & 0x0F],       \
      (W[t & 0x0F] = S(temp, 1)))
 #define P(a, b, c, d, e, x)                \
     {                                      \
@@ -197,7 +197,7 @@ sha1_round(uint32_t h[], const uint8_t *chunk)
 }
 
 extern void
-t_sha1(uint8_t digest[], const uint8_t *msg, size_t len)
+bt_sha1(uint8_t digest[], const uint8_t *msg, size_t len)
 {
     uint8_t end[64];
     uint32_t h[5] = {0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476,
