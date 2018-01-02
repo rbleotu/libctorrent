@@ -31,6 +31,11 @@ typedef struct bstring *BT_BString;
 #define B_LIST(x) ((x).u.list)
 #define B_DICT(x) ((x).u.dict)
 
+struct bstring {
+    size_t len;
+    uint8_t content[];
+};
+
 struct bcode {
     int id;
 

@@ -13,11 +13,6 @@
 
 typedef struct barray *BArray;
 
-struct bstring {
-    size_t len;
-    uint8_t content[];
-};
-
 struct barray {
     size_t n, cap;
     BT_BCode base[];
