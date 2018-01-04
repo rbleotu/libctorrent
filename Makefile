@@ -2,14 +2,16 @@
 SRC_DIR ::= ./src
 OBJ_DIR ::= ./obj
 SRC ::= crypt/sha1.c bcode/bcode.c torrent.c \
-	disk/disk.c error.c main.c
+	disk/disk.c\
+	tracker/tracker.c tracker/tracker_udp.c\
+	error.c main.c
 
 VPATH ::= $(SRC_DIR)
 OBJ ::=  $(patsubst %.c, $(OBJ_DIR)/%.o, $(notdir $(SRC)))
 TARGET ::= a.out
 ######## BUILD OPTIONS ########
 CC ?= gcc
-CFLAGS ::= -Wall -Wextra -Wpedantic -std=c99\
+CFLAGS ::= -Wall -Wextra\
 	-Wno-unused-variable -Wno-unused-parameter\
 	-Wno-unused-function -I$(SRC_DIR)
 ########     RULES     ########
