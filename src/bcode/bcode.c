@@ -11,13 +11,6 @@
 #include "../error.h"
 #include "bcode.h"
 
-typedef struct barray *BArray;
-
-struct barray {
-    size_t n, cap;
-    BT_BCode base[];
-};
-
 local BArray
 barray_new(size_t cap)
 {
@@ -168,7 +161,7 @@ sc_read_num(BT_BParser ctx)
 local BT_BString
 t_bstring_new(size_t len)
 {
-    BT_BString str = bt_malloc(sizeof(*str) + len);
+    BT_BString str = bt_malloc(sizeof(*str) + len + 1);
     if (!str)
         return NULL;
     str->len = len;
@@ -215,6 +208,7 @@ parse_string(BT_BParser ctx)
     int s = sc_read_string(ctx, ret->content, len);
     if (s < 0)
         throw_error(ctx, BT_ESYNTAX);
+    ret->content[len] = '\0';
     return ret;
 }
 
@@ -465,30 +459,59 @@ struct bencoder {
 };
 
 local size_t
-benc_printf(BEncoder ctx, const char *fmt, ...)
+bencode_array(u8 str[], size_t len, BT_BCode v[], size_t n)
 {
-    va_list ap;
-    size_t len;
-    va_start(ap, fmt);
-    len = vsnprintf((char *)ctx->dest, ctx->rem, fmt, ap) - 1;
-    va_end(ap);
-    ctx->rem -= MIN(len, ctx->rem);
-    ctx->dest += len;
-    return len;
+    size_t res = 0;
+    for (size_t tmp, i = 0; i < n; ++i) {
+        tmp = bt_bencode(str, len, v[i]);
+        res += tmp;
+        tmp = MIN(tmp, len);
+        str += tmp, len -= tmp;
+    }
+    return res;
 }
 
 extern size_t
-bt_bencode(uint8_t dest[], size_t len, BT_BCode *b)
+bt_bencode(uint8_t dest[], size_t len, BT_BCode b)
 {
-    // struct bencoder ctx = {.dest = dest, .rem = len};
-    // switch (b.id) {
-    // case BCODE_INT: {
-    //    return snprintf((char *)dest, len, "i%lde", B_NUM(b));
-    //} break;
-    // case BCODE_STRING: {
-    //    return snprintf((char *)dest, len, "%zu:"
-    //}
-    //}
+    size_t res = 0;
+    char tmp[32];
+    switch (b.id) {
+    case BCODE_INT: {
+        res = snprintf(tmp, sizeof(tmp), "i%lde", B_NUM(b));
+        if (dest)
+            memcpy(dest, tmp, MIN(len, res));
+        return res;
+    }
+    case BCODE_STRING: {
+        size_t slen = B_STRING(b)->len;
+        res = snprintf(tmp, sizeof(tmp), "%zu:", slen);
+        if (dest) {
+            memcpy(dest, tmp, MIN(len, res));
+            dest += MIN(len, res), len -= MIN(len, res);
+            memcpy(dest, B_STRING(b)->content, MIN(len, slen));
+        }
+        return res + slen;
+    }
+    case BCODE_LIST: {
+        if (dest && len--)
+            *dest++ = 'l';
+        res = bencode_array(dest, len, B_LIST(b)->base, B_LIST(b)->n);
+        if (dest && len--)
+            dest[res] = 'e';
+        return res + 2;
+    }
+    case BCODE_DICT: {
+        if (dest && len--)
+            *dest++ = 'd';
+        res = bencode_array(dest, len, B_DICT(b)->base, B_DICT(b)->n);
+        if (dest && len--)
+            dest[res] = 'e';
+        return res + 2;
+    } break;
+    default:
+        assert(0);
+    }
     return 0;
 }
 
@@ -506,6 +529,15 @@ bt_bencode(uint8_t dest[], size_t len, BT_BCode *b)
 //        fprintf(stderr, "Error decoding: %s\n", bt_strerror());
 //        return 1;
 //    }
-//    bt_bcode_fprint(stdout, b);
+//
+//    size_t len = bt_bencode(NULL, 0, b);
+//    uint8_t *dest = malloc(len);
+//    if (!dest) {
+//        perror("malloc");
+//        return 1;
+//    }
+//    bt_bencode(dest, len, b);
+//    fwrite(dest, 1, len, stdout);
+//
 //    return 0;
 //}
