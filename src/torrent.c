@@ -4,6 +4,7 @@
 #include <assert.h>
 #include <setjmp.h>
 #include <string.h>
+#include <stdarg.h>
 
 #include "common.h"
 #include "bcode/bcode.h"
@@ -11,19 +12,54 @@
 #include "crypt/sha1.h"
 #include "torrent.h"
 #include "disk/disk.h"
+#include "tracker/tracker.h"
+#include "piece.h"
 
 struct bt_torrent {
     BT_BCode info;
 
-    uint8_t info_digest[SHA1_DIGEST_LEN];
+    uint8_t info_hash[SHA1_DIGEST_LEN];
 
     const char *outdir;
-    const char *announce;
+    const char *announce[MAX_TRACKERS + 1];
 
     BT_DiskMgr mgr;
+    off_t size, size_have;
 
     jmp_buf env;
+
+    unsigned npeer;
+    struct peer *peertab;
+
+    size_t piece_length;
+    unsigned npieces, nhave;
+
+    struct bt_piece piecetab[];
 };
+
+local inline unsigned
+hex_value(char h)
+{
+    /* clang-format off */
+    return h >= '0' && h <= '9' ? h - '0' :
+           h >= 'a' && h <= 'f' ? h - 'a' + 10:
+           h >= 'A' && h <= 'F' ? h - 'A' + 10: 0;
+    /* clang-format on */
+}
+
+local size_t
+hex_decode(uint8_t dest[], size_t dlen, const char *src, size_t slen)
+{
+    for (size_t i = 0; slen--; *dest <<= 4, i++) {
+        *dest |= hex_value(*src++);
+        if (i % 2) {
+            if (!dlen--)
+                break;
+            ++dest;
+        }
+    }
+    return dlen;
+}
 
 local BT_Torrent
 bt_torrent_alloc(void)
@@ -33,6 +69,13 @@ bt_torrent_alloc(void)
         bt_errno = BT_EALLOC;
         return NULL;
     }
+    t->npeer = 0;
+    t->peertab = NULL;
+    t->npieces = 0;
+    t->piece_length = 0;
+    t->nhave = 0;
+    t->size = 0;
+    t->mgr = NULL;
     return t;
 }
 
@@ -42,33 +85,69 @@ bt_torrent_alloc(void)
             goto format_error; \
     } while (0)
 
+#define safe_realloc(buf, sz)              \
+    do {                                   \
+        void *tmp_ = realloc((buf), (sz)); \
+        if (!tmp_) {                       \
+            bt_errno = BT_EALLOC;          \
+            goto alloc_error;              \
+        }                                  \
+        (buf) = tmp_;                      \
+    } while (0)
+
 local char *
-path_from_list(BT_BCode b)
+vjoin_strings(size_t *sz, va_list ap)
+{
+    assert(sz);
+    char *res = NULL;
+    size_t i = 0, len;
+    for (char *str; (str = va_arg(ap, char *)); i += len) {
+        len = strlen(str);
+        safe_realloc(res, i + len + 1);
+        memcpy(res + i, str, len);
+    }
+    *sz = i + 1;
+    res[i] = '\0';
+    return res;
+alloc_error:
+    free(res);
+    return NULL;
+}
+
+local char *
+build_path(BT_BCode b, ...)
 {
 #define INIT_SZ 16
 #define INCR_SZ 32
     assert(B_ISLIST(b));
-    char *res = bt_malloc(INIT_SZ);
-    if (!res)
-        goto alloc_error;
-    size_t i = 0, sz = INIT_SZ;
+
+    va_list ap;
+    char *res;
+    size_t i = 0, sz = 0;
     BT_BCode s;
+
+    va_start(ap, b);
+    res = vjoin_strings(&sz, ap);
+    va_end(ap);
+
+    if (!res)
+        return NULL;
+
+    i = sz - 1;
+    res[i++] = '/';
+
     for (size_t n = 0; !B_ISNIL(s = bt_bcode_get(b, n)); n++) {
         format_check(B_ISSTRING(s));
         if (i + B_STRING(s)->len + 2 >= sz) {
             sz = i + B_STRING(s)->len + 2 + INCR_SZ;
-            char *tmp = realloc(res, sz);
-            if (!tmp) {
-                bt_free(res);
-                goto alloc_error;
-            }
-            res = tmp;
+            safe_realloc(res, sz);
         }
         memcpy(res + i, B_STRING(s)->content, B_STRING(s)->len);
         i += B_STRING(s)->len;
         if (!B_ISNIL(bt_bcode_get(b, n + 1)))
             res[i++] = '/';
     }
+
     res[i] = '\0';
     return realloc(res, i + 1);
 alloc_error:
@@ -82,23 +161,91 @@ format_error:
 #undef INCR_SZ
 }
 
+
+local int
+init_pieces(BT_Torrent t, BT_BCode pieces)
+{
+    assert(t);
+    size_t plen = t->piece_length;
+    size_t rem = t->size;
+    size_t n = B_STRING(pieces)->len / SHA1_DIGEST_LEN;
+    uint8_t(*hash_tab)[SHA1_DIGEST_LEN] =
+            (void *)B_STRING(pieces)->content;
+    for (BT_Piece i = t->piecetab; rem; ++i) {
+        if (!n) {
+            bt_errno = BT_EFORMAT;
+            return -1;
+        }
+        i->have = 0;
+        i->off = t->size - rem;
+        memcpy(i->hash, *hash_tab, SHA1_DIGEST_LEN);
+        n -= SHA1_DIGEST_LEN, ++hash_tab;
+        rem -= (i->length = MIN(rem, plen));
+    }
+    return 0;
+}
+
+local size_t
+get_trackers(BT_Torrent t)
+{
+    assert(t);
+    size_t n = 0;
+    BT_BCode announce = bt_bcode_get(t->info, "announce");
+    if (B_ISSTRING(announce))
+        t->announce[n++] = (char *)B_STRING(announce)->content;
+    BT_BCode anlst = bt_bcode_get(t->info, "announce-list");
+    if (B_ISLIST(anlst)) {
+        BT_BCode tier, tracker;
+        for (size_t i = 0; i < B_LIST(anlst)->n; i++) {
+            tier = bt_bcode_get(anlst, i);
+            if (!B_ISLIST(tier))
+                continue;
+            for (size_t j = 0; j < B_LIST(tier)->n; j++) {
+                tracker = bt_bcode_get(tier, j);
+                if (B_ISSTRING(tracker)) {
+                    assert(n < MAX_TRACKERS);
+                    t->announce[n++] =
+                            (char *)B_STRING(tracker)->content;
+                }
+            }
+        }
+    }
+    t->announce[n] = NULL;
+    return n;
+}
+
+
+local int
+compute_hash(uint8_t hash[], BT_BCode b)
+{
+    size_t len = bt_bencode(NULL, 0, b);
+    uint8_t *str = bt_malloc(len);
+    if (!str) {
+        bt_errno = BT_EALLOC;
+        return -1;
+    }
+    bt_bencode(str, len, b);
+    bt_sha1(hash, str, len);
+    bt_free(str);
+    return 0;
+}
+
 extern BT_Torrent
 bt_torrent_new(FILE *f, const char *outdir)
 {
     assert(f);
     char *path;
     BT_BCode info, files, name;
+    BT_BCode piece_length, pieces;
+    const char *name_str;
     off_t sz;
 
     BT_Torrent t = bt_torrent_alloc();
     if (!t)
         return NULL;
 
-    if (bt_bdecode_file(&t->info, f) < 0) {
-        bt_free(t);
-        return NULL;
-    }
-
+    if (bt_bdecode_file(&t->info, f) < 0)
+        goto cleanup;
     format_check(B_ISDICT(t->info));
 
     info = bt_bcode_get(t->info, "info");
@@ -107,11 +254,22 @@ bt_torrent_new(FILE *f, const char *outdir)
     name = bt_bcode_get(info, "name");
     format_check(B_ISSTRING(name));
 
+    piece_length = bt_bcode_get(info, "piece length");
+    format_check(B_ISNUM(piece_length));
+
+    pieces = bt_bcode_get(info, "pieces");
+    format_check(B_ISSTRING(pieces));
+
+    t->piece_length = B_NUM(piece_length);
+
     t->mgr = bt_disk_new(30);
     if (!t->mgr)
         goto cleanup;
 
+    name_str = (char *)B_STRING(name)->content;
+
     if (B_ISLIST(files = bt_bcode_get(info, "files"))) {
+        t->size = 0;
         for (size_t i = 0;; i++) {
             BT_BCode tmp = bt_bcode_get(files, i);
             if (B_ISNIL(tmp))
@@ -121,42 +279,94 @@ bt_torrent_new(FILE *f, const char *outdir)
             tmp = bt_bcode_get(tmp, "path");
             format_check(B_ISLIST(tmp));
 
-            if (!(path = path_from_list(tmp)))
+            if (!(path = build_path(tmp, outdir, name_str, NULL)))
                 goto cleanup;
 
             sz = B_NUM(
                     bt_bcode_get(bt_bcode_get(files, i), "length"));
-            printf("path:%s size:%ld\n", path, sz);
+            t->size += sz;
 
             if (bt_disk_add_file(t->mgr, path, sz) < 0)
                 goto cleanup;
         }
     } else {
-        path = (char *)B_STRING(name)->content;
-        sz = B_STRING(name)->len;
-        if (bt_disk_add_file(t->mgr, path, sz) < 0)
-            goto cleanup;
+        /* TODO */
+        assert(0);
+        // sz = B_STRING(name)->len;
+        // t->size += sz;
+        // if (bt_disk_add_file(t->mgr, name_str, sz) < 0)
+        //    goto cleanup;
     }
 
-    // if (bt_disk_check(t->pieces, t->npieces) < 0)
-    //    goto cleanup;
+    t->npieces = CEIL_DIV(t->size, t->piece_length);
+    printf("npieces: %u\n", t->npieces);
+
+    safe_realloc(t, sizeof(*t) + sizeof(struct bt_piece[t->npieces]));
+
+    if (init_pieces(t, pieces) < 0)
+        goto cleanup;
+
+    if (get_trackers(t) == 0) {
+        bt_errno = BT_ENOTRACKER;
+        goto cleanup;
+    }
+
+    if (compute_hash(t->info_hash, info) < 0)
+        goto cleanup;
 
     return t;
-
 format_error:
     bt_errno = BT_EFORMAT;
     return NULL;
-
+alloc_error:
 cleanup:
     bt_free(t);
     return NULL;
 }
 
-extern int
-bt_torrent_tracker_request(BT_Torrent t)
+extern unsigned
+bt_torrent_tracker_request(BT_Torrent t, unsigned npeer)
 {
-    return 0;
+    assert(t);
+    assert(t->announce);
+
+    struct tracker_request req;
+    struct tracker_response resp;
+    unsigned ret = 0;
+    const char *tmp, **l = t->announce;
+    req = (struct tracker_request){.downloaded = 0,
+                                   .left = t->size,
+                                   .uploaded = 0,
+                                   .num_want = npeer,
+                                   .event = 0,
+                                   .port = 3024};
+
+    if (t->npeer) {
+        free(t->peertab);
+        t->npeer = 0;
+    }
+
+    t->peertab = bt_malloc(sizeof(struct peer[npeer]));
+    if (!t->peertab) {
+        bt_errno = BT_EALLOC;
+        return 0;
+    }
+
+    resp.peertab = t->peertab;
+
+    memcpy(req.info_hash, t->info_hash, SHA1_DIGEST_LEN);
+
+    for (; *l; ++l) {
+        puts(*l);
+        if ((ret = bt_tracker_request(&resp, *l, &req)) == npeer) {
+            SWAP(t->announce[0], l[0], tmp);
+            break;
+        }
+    }
+
+    return t->npeer = ret;
 }
+
 
 extern void
 bt_torrent_add_action(BT_Torrent t, int ev, void *h)
@@ -166,11 +376,45 @@ bt_torrent_add_action(BT_Torrent t, int ev, void *h)
 extern int
 bt_torrent_start(BT_Torrent t)
 {
+    // bt_net_loop(t);
     return 0;
 }
 
 extern int
 bt_torrent_pause(BT_Torrent t)
 {
+    return 0;
+}
+
+extern int
+bt_torrent_check(BT_Torrent t)
+{
+    assert(t);
+    assert(t->mgr);
+
+    uint8_t hash[SHA1_DIGEST_LEN];
+
+    uint8_t *data = bt_malloc(t->piece_length);
+    if (!data) {
+        bt_errno = BT_EALLOC;
+        return -1;
+    }
+
+    for (size_t i = 0; i < t->npieces; i++) {
+        if (bt_disk_get_piece(data, t->mgr, &t->piecetab[i]) < 0)
+            return -1;
+        bt_sha1(hash, data, t->piecetab[i].length);
+        if (!memcmp(hash, t->piecetab[i].hash, SHA1_DIGEST_LEN)) {
+            t->piecetab[i].have = 1;
+            struct bt_piece tmp;
+            SWAP(t->piecetab[t->nhave], t->piecetab[i], tmp);
+            t->size_have += t->piecetab[i].length;
+            t->nhave++;
+        }
+    }
+
+    printf("have: %u\n", t->nhave);
+
+    free(data);
     return 0;
 }

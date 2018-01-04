@@ -3,6 +3,7 @@
 
 #include <error.h>
 
+#define MAX_TRACKERS 64
 typedef struct bt_torrent *BT_Torrent;
 
 enum {
@@ -26,7 +27,10 @@ extern int
 bt_torrent_start(BT_Torrent t);
 
 extern int
-bt_torrent_tracker_request(BT_Torrent t);
+bt_torrent_check(BT_Torrent t);
+
+extern unsigned
+bt_torrent_tracker_request(BT_Torrent t, unsigned npeer);
 
 extern int
 bt_torrent_pause(BT_Torrent t);

@@ -92,6 +92,78 @@ bt_disk_add_file(BT_DiskMgr m, char *path, off_t sz)
     return 0;
 }
 
+local size_t
+file_from_offset(struct bt_file v[], size_t n, off_t x)
+{
+    size_t i = 0;
+    while (++i < n)
+        if (v[i].off >= x)
+            break;
+    return i - 1;
+}
+
+local ssize_t
+readn(int fd, void *vptr, size_t n)
+{
+    size_t nleft;
+    ssize_t nread;
+    char *ptr;
+
+    ptr = vptr;
+    nleft = n;
+    while (nleft > 0) {
+        if ((nread = read(fd, ptr, nleft)) < 0) {
+            if (errno == EINTR)
+                nread = 0; /* and call read() again */
+            else
+                return (-1);
+        } else if (nread == 0)
+            break; /* EOF */
+
+        nleft -= nread;
+        ptr += nread;
+    }
+    return (n - nleft); /* return >= 0 */
+}
+
+int
+bt_disk_get_piece(uint8_t dest[], BT_DiskMgr m, BT_Piece p)
+{
+    assert(p);
+    assert(dest);
+    assert(m);
+
+    size_t i = file_from_offset(m->files, m->nfiles, p->off);
+    size_t psz = p->length;
+    size_t fsz;
+    size_t pfoff = p->off;
+    ssize_t nread, nxfer;
+
+    for (; psz; i++) {
+        assert(i < m->nfiles);
+        fsz = m->files[i].sz;
+        pfoff = pfoff % fsz;
+        if (lseek(m->files[i].fd, pfoff, SEEK_SET) == -1) {
+            bt_errno = BT_ELSEEK;
+            return -1;
+        }
+        fsz -= pfoff;
+        nread = MIN(fsz, psz);
+        if ((nxfer = readn(m->files[i].fd, dest, nread)) < 0) {
+            bt_errno = BT_EREAD;
+            return -1;
+        }
+        if (nxfer < nread) {
+            memset(dest + nxfer, 0, nread - nxfer);
+            nread = psz;
+        }
+        pfoff = 0;
+        psz -= nread, dest += nread;
+    }
+
+    return 0;
+}
+
 // int
 // main(int argc, char *argv[])
 //{

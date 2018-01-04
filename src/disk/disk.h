@@ -3,6 +3,7 @@
 
 #include <sys/types.h>
 #include <unistd.h>
+#include "../piece.h"
 
 typedef struct bt_diskmgr *BT_DiskMgr;
 
@@ -27,8 +28,7 @@ BT_DiskMgr
 bt_disk_new(size_t n);
 
 int
-bt_disk_get_piece(IN BT_DiskMgr, OUT u8 data[], IN size_t len,
-                  IN off_t off);
+bt_disk_get_piece(OUT u8 data[], IN BT_DiskMgr m, IN BT_Piece p);
 
 int
 bt_disk_put_piece(IN BT_DiskMgr, IN const u8 *data, IN size_t len,
