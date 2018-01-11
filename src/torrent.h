@@ -21,7 +21,7 @@ enum {
 };
 
 extern BT_Torrent
-bt_torrent_new(FILE *fin, const char *outdir);
+bt_torrent_new(FILE *fin, const char *outdir, unsigned short port);
 
 extern int
 bt_torrent_start(BT_Torrent t);
@@ -29,7 +29,7 @@ bt_torrent_start(BT_Torrent t);
 extern int
 bt_torrent_check(BT_Torrent t);
 
-extern unsigned
+extern int
 bt_torrent_tracker_request(BT_Torrent t, unsigned npeer);
 
 extern int

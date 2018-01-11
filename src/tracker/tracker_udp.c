@@ -64,7 +64,7 @@ struct announce_response {
     uint32_t interval;
     uint32_t leechers;
     uint32_t seeders;
-    struct peer *peers;
+    struct bt_peer_addr *peers;
 };
 
 static inline void
@@ -169,7 +169,7 @@ tracker_connect(OUT struct connect_response *conresp,
 static inline int
 unpack_peers(u8 buf[], size_t len, struct announce_response *resp)
 {
-    struct peer *v = resp->peers;
+    struct bt_peer_addr *v = resp->peers;
     int res = (len - 20) / 6;
     while (len > 20) {
         GET_U32BE(buf, v->ipv4);

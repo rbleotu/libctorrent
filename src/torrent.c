@@ -16,8 +16,6 @@
 #include "piece.h"
 
 struct bt_torrent {
-    BT_BCode info;
-
     uint8_t info_hash[SHA1_DIGEST_LEN];
 
     const char *outdir;
@@ -26,10 +24,9 @@ struct bt_torrent {
     BT_DiskMgr mgr;
     off_t size, size_have;
 
-    jmp_buf env;
-
-    unsigned npeer;
-    struct peer *peertab;
+    unsigned naddr;
+    struct bt_peer_addr *addrtab;
+    unsigned short port;
 
     size_t piece_length;
     unsigned npieces, nhave;
@@ -69,8 +66,8 @@ bt_torrent_alloc(void)
         bt_errno = BT_EALLOC;
         return NULL;
     }
-    t->npeer = 0;
-    t->peertab = NULL;
+    t->naddr = 0;
+    t->addrtab = NULL;
     t->npieces = 0;
     t->piece_length = 0;
     t->nhave = 0;
@@ -186,14 +183,13 @@ init_pieces(BT_Torrent t, BT_BCode pieces)
 }
 
 local size_t
-get_trackers(BT_Torrent t)
+get_trackers(const char *dest[], BT_BCode meta)
 {
-    assert(t);
     size_t n = 0;
-    BT_BCode announce = bt_bcode_get(t->info, "announce");
+    BT_BCode announce = bt_bcode_get(meta, "announce");
     if (B_ISSTRING(announce))
-        t->announce[n++] = (char *)B_STRING(announce)->content;
-    BT_BCode anlst = bt_bcode_get(t->info, "announce-list");
+        dest[n++] = (char *)B_STRING(announce)->content;
+    BT_BCode anlst = bt_bcode_get(meta, "announce-list");
     if (B_ISLIST(anlst)) {
         BT_BCode tier, tracker;
         for (size_t i = 0; i < B_LIST(anlst)->n; i++) {
@@ -204,13 +200,12 @@ get_trackers(BT_Torrent t)
                 tracker = bt_bcode_get(tier, j);
                 if (B_ISSTRING(tracker)) {
                     assert(n < MAX_TRACKERS);
-                    t->announce[n++] =
-                            (char *)B_STRING(tracker)->content;
+                    dest[n++] = (char *)B_STRING(tracker)->content;
                 }
             }
         }
     }
-    t->announce[n] = NULL;
+    dest[n] = NULL;
     return n;
 }
 
@@ -231,12 +226,18 @@ compute_hash(uint8_t hash[], BT_BCode b)
 }
 
 extern BT_Torrent
-bt_torrent_new(FILE *f, const char *outdir)
+bt_torrent_new(FILE *f, const char *outdir, unsigned short port)
 {
     assert(f);
+
+    BT_BCode meta;
+    BT_BCode info;
+    BT_BCode files;
+    BT_BCode name;
+    BT_BCode piece_length;
+    BT_BCode pieces;
+
     char *path;
-    BT_BCode info, files, name;
-    BT_BCode piece_length, pieces;
     const char *name_str;
     off_t sz;
 
@@ -244,11 +245,13 @@ bt_torrent_new(FILE *f, const char *outdir)
     if (!t)
         return NULL;
 
-    if (bt_bdecode_file(&t->info, f) < 0)
-        goto cleanup;
-    format_check(B_ISDICT(t->info));
+    t->port = port;
 
-    info = bt_bcode_get(t->info, "info");
+    if (bt_bdecode_file(&meta, f) < 0)
+        goto cleanup;
+    format_check(B_ISDICT(meta));
+
+    info = bt_bcode_get(meta, "info");
     format_check(B_ISDICT(info));
 
     name = bt_bcode_get(info, "name");
@@ -306,7 +309,7 @@ bt_torrent_new(FILE *f, const char *outdir)
     if (init_pieces(t, pieces) < 0)
         goto cleanup;
 
-    if (get_trackers(t) == 0) {
+    if (get_trackers(t->announce, meta) == 0) {
         bt_errno = BT_ENOTRACKER;
         goto cleanup;
     }
@@ -324,7 +327,7 @@ cleanup:
     return NULL;
 }
 
-extern unsigned
+extern int
 bt_torrent_tracker_request(BT_Torrent t, unsigned npeer)
 {
     assert(t);
@@ -332,39 +335,35 @@ bt_torrent_tracker_request(BT_Torrent t, unsigned npeer)
 
     struct tracker_request req;
     struct tracker_response resp;
-    unsigned ret = 0;
-    const char *tmp, **l = t->announce;
+    unsigned nhave;
+    const char **l = t->announce;
+
+    safe_realloc(t->addrtab,
+                 sizeof(t->addrtab[0]) * (t->naddr + npeer));
+
     req = (struct tracker_request){.downloaded = 0,
-                                   .left = t->size,
+                                   .left = t->size - t->size_have,
                                    .uploaded = 0,
                                    .num_want = npeer,
                                    .event = 0,
-                                   .port = 3024};
-
-    if (t->npeer) {
-        free(t->peertab);
-        t->npeer = 0;
-    }
-
-    t->peertab = bt_malloc(sizeof(struct peer[npeer]));
-    if (!t->peertab) {
-        bt_errno = BT_EALLOC;
-        return 0;
-    }
-
-    resp.peertab = t->peertab;
-
+                                   .port = t->port};
+    resp = (struct tracker_response){.peertab =
+                                             t->addrtab + t->naddr};
     memcpy(req.info_hash, t->info_hash, SHA1_DIGEST_LEN);
 
-    for (; *l; ++l) {
+    for (nhave = 0; *l; ++l) {
         puts(*l);
-        if ((ret = bt_tracker_request(&resp, *l, &req)) == npeer) {
-            SWAP(t->announce[0], l[0], tmp);
+        if (nhave == npeer)
             break;
-        }
+        unsigned n = bt_tracker_request(&resp, *l, &req);
+        resp.peertab += n, req.num_want -= n;
+        nhave += n;
     }
 
-    return t->npeer = ret;
+
+    return t->naddr += nhave;
+alloc_error:
+    return -1;
 }
 
 
@@ -376,7 +375,12 @@ bt_torrent_add_action(BT_Torrent t, int ev, void *h)
 extern int
 bt_torrent_start(BT_Torrent t)
 {
-    // bt_net_loop(t);
+#define QUEUE_CAP 30
+    assert(t);
+    if (!t->naddr) {
+        bt_errno = BT_ENOPEERS;
+        return -1;
+    }
     return 0;
 }
 
@@ -400,9 +404,10 @@ bt_torrent_check(BT_Torrent t)
         return -1;
     }
 
-    for (size_t i = 0; i < t->npieces; i++) {
+    for (unsigned i = 0; i < t->npieces; i++) {
         if (bt_disk_get_piece(data, t->mgr, &t->piecetab[i]) < 0)
             return -1;
+        // printf("%u/%u\n", i, t->npieces);
         bt_sha1(hash, data, t->piecetab[i].length);
         if (!memcmp(hash, t->piecetab[i].hash, SHA1_DIGEST_LEN)) {
             t->piecetab[i].have = 1;

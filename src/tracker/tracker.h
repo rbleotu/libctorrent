@@ -3,26 +3,21 @@
 
 #include "../common.h"
 
-struct peer {
-    uint32_t ipv4;
-    uint16_t port;
-};
-
 struct tracker_request {
-    uint8_t peer_id[20];
-    uint8_t info_hash[20];
-    uint64_t downloaded;
-    uint64_t left;
-    uint64_t uploaded;
-    uint32_t transaction_id;
-    uint32_t num_want;
-    uint32_t event;
-    uint16_t port;
+    u8 peer_id[20];
+    u8 info_hash[20];
+    u64 downloaded;
+    u64 left;
+    u64 uploaded;
+    u32 transaction_id;
+    u32 num_want;
+    u32 event;
+    u16 port;
 };
 
 struct tracker_response {
-    uint32_t leechers, seeders;
-    struct peer *peertab;
+    u32 leechers, seeders;
+    struct bt_peer_addr *peertab;
 };
 
 unsigned
