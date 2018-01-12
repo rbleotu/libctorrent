@@ -12,4 +12,12 @@ bt_bitset_set(BT_Bitset b, size_t i);
 void
 bt_bitset_clear(BT_Bitset b, size_t i);
 
+void
+bt_bitset_fprint(FILE *to, BT_Bitset set);
+
+void
+bt_bitset_read_arr(BT_Bitset b, u8 v[], size_t sz);
+
+int
+bt_bitset_get(BT_Bitset set, size_t i);
 #endif
