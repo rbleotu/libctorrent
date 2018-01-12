@@ -4,6 +4,8 @@ OBJ_DIR ::= ./obj
 SRC ::= crypt/sha1.c bcode/bcode.c torrent.c \
 	disk/disk.c\
 	tracker/tracker.c tracker/tracker_udp.c\
+	net/thread.c message.c piece.c\
+	bitset.c pqueue.c\
 	error.c main.c
 
 VPATH ::= $(SRC_DIR)
@@ -12,7 +14,7 @@ TARGET ::= a.out
 ######## BUILD OPTIONS ########
 CC ?= gcc
 CFLAGS ::= -Wall -Wextra\
-	-Wno-unused-variable -Wno-unused-parameter\
+	-Wno-unused-variable -Wno-unused-parameter -pthread\
 	-Wno-unused-function -I$(SRC_DIR)
 ########     RULES     ########
 .PHONY: all debug test clean

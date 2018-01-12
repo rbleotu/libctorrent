@@ -14,25 +14,9 @@
 #include "disk/disk.h"
 #include "tracker/tracker.h"
 #include "piece.h"
+#include "net/thread.h"
+#include "torrentx.h"
 
-struct bt_torrent {
-    uint8_t info_hash[SHA1_DIGEST_LEN];
-
-    const char *outdir;
-    const char *announce[MAX_TRACKERS + 1];
-
-    BT_DiskMgr mgr;
-    off_t size, size_have;
-
-    unsigned naddr;
-    struct bt_peer_addr *addrtab;
-    unsigned short port;
-
-    size_t piece_length;
-    unsigned npieces, nhave;
-
-    struct bt_piece piecetab[];
-};
 
 local inline unsigned
 hex_value(char h)
@@ -134,6 +118,8 @@ build_path(BT_BCode b, ...)
     res[i++] = '/';
 
     for (size_t n = 0; !B_ISNIL(s = bt_bcode_get(b, n)); n++) {
+        if (!B_ISSTRING(s))
+            break;
         format_check(B_ISSTRING(s));
         if (i + B_STRING(s)->len + 2 >= sz) {
             sz = i + B_STRING(s)->len + 2 + INCR_SZ;
@@ -141,7 +127,7 @@ build_path(BT_BCode b, ...)
         }
         memcpy(res + i, B_STRING(s)->content, B_STRING(s)->len);
         i += B_STRING(s)->len;
-        if (!B_ISNIL(bt_bcode_get(b, n + 1)))
+        if (B_ISSTRING(bt_bcode_get(b, n + 1)))
             res[i++] = '/';
     }
 
@@ -173,11 +159,10 @@ init_pieces(BT_Torrent t, BT_BCode pieces)
             bt_errno = BT_EFORMAT;
             return -1;
         }
-        i->have = 0;
-        i->off = t->size - rem;
+        bt_piece_init(i, t->size - rem, MIN(rem, plen));
         memcpy(i->hash, *hash_tab, SHA1_DIGEST_LEN);
         n -= SHA1_DIGEST_LEN, ++hash_tab;
-        rem -= (i->length = MIN(rem, plen));
+        rem -= i->length;
     }
     return 0;
 }
@@ -265,7 +250,7 @@ bt_torrent_new(FILE *f, const char *outdir, unsigned short port)
 
     t->piece_length = B_NUM(piece_length);
 
-    t->mgr = bt_disk_new(30);
+    t->mgr = bt_disk_new(128);
     if (!t->mgr)
         goto cleanup;
 
@@ -282,8 +267,9 @@ bt_torrent_new(FILE *f, const char *outdir, unsigned short port)
             tmp = bt_bcode_get(tmp, "path");
             format_check(B_ISLIST(tmp));
 
-            if (!(path = build_path(tmp, outdir, name_str, NULL)))
+            if (!(path = build_path(tmp, outdir, name_str, NULL))) {
                 goto cleanup;
+            }
 
             sz = B_NUM(
                     bt_bcode_get(bt_bcode_get(files, i), "length"));
@@ -293,12 +279,14 @@ bt_torrent_new(FILE *f, const char *outdir, unsigned short port)
                 goto cleanup;
         }
     } else {
-        /* TODO */
-        assert(0);
-        // sz = B_STRING(name)->len;
-        // t->size += sz;
-        // if (bt_disk_add_file(t->mgr, name_str, sz) < 0)
-        //    goto cleanup;
+        char path[256];
+        sz = B_NUM(bt_bcode_get(info, "length"));
+
+        snprintf(path, sizeof(path), "%s/%s", outdir,
+                 (char *)B_STRING(name)->content);
+
+        if (bt_disk_add_file(t->mgr, path, sz) < 0)
+            goto cleanup;
     }
 
     t->npieces = CEIL_DIV(t->size, t->piece_length);
@@ -375,12 +363,12 @@ bt_torrent_add_action(BT_Torrent t, int ev, void *h)
 extern int
 bt_torrent_start(BT_Torrent t)
 {
-#define QUEUE_CAP 30
     assert(t);
     if (!t->naddr) {
         bt_errno = BT_ENOPEERS;
         return -1;
     }
+    bt_net_start(t);
     return 0;
 }
 
@@ -407,12 +395,9 @@ bt_torrent_check(BT_Torrent t)
     for (unsigned i = 0; i < t->npieces; i++) {
         if (bt_disk_get_piece(data, t->mgr, &t->piecetab[i]) < 0)
             return -1;
-        // printf("%u/%u\n", i, t->npieces);
         bt_sha1(hash, data, t->piecetab[i].length);
         if (!memcmp(hash, t->piecetab[i].hash, SHA1_DIGEST_LEN)) {
             t->piecetab[i].have = 1;
-            struct bt_piece tmp;
-            SWAP(t->piecetab[t->nhave], t->piecetab[i], tmp);
             t->size_have += t->piecetab[i].length;
             t->nhave++;
         }

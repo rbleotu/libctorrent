@@ -2,6 +2,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <pthread.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -136,13 +137,12 @@ bt_disk_get_piece(uint8_t dest[], BT_DiskMgr m, BT_Piece p)
     size_t i = file_from_offset(m->files, m->nfiles, p->off);
     size_t psz = p->length;
     size_t fsz;
-    size_t pfoff = p->off;
+    size_t pfoff = p->off - m->files[i].off;
     ssize_t nread, nxfer;
 
     for (; psz; i++) {
         assert(i < m->nfiles);
         fsz = m->files[i].sz;
-        pfoff = pfoff % fsz;
         if (lseek(m->files[i].fd, pfoff, SEEK_SET) == -1) {
             bt_errno = BT_ELSEEK;
             return -1;
@@ -164,6 +164,63 @@ bt_disk_get_piece(uint8_t dest[], BT_DiskMgr m, BT_Piece p)
     return 0;
 }
 
+local ssize_t
+writen(int fd, const void *vptr, size_t n)
+{
+    size_t nleft;
+    ssize_t nwritten;
+    const char *ptr;
+
+    ptr = vptr;
+    nleft = n;
+    while (nleft > 0) {
+        if ((nwritten = write(fd, ptr, nleft)) <= 0) {
+            if (nwritten < 0 && errno == EINTR)
+                nwritten = 0; /* and call write() again */
+            else
+                return (-1); /* error */
+        }
+
+        nleft -= nwritten;
+        ptr += nwritten;
+    }
+    return (n);
+}
+
+int
+bt_disk_write_piece(uint8_t src[], BT_DiskMgr m, BT_Piece p)
+{
+    assert(p);
+    assert(src);
+    assert(m);
+    pthread_mutex_lock(&p->lock);
+
+    size_t i = file_from_offset(m->files, m->nfiles, p->off);
+    size_t psz = p->length;
+    size_t fsz;
+    size_t pfoff = p->off - m->files[i].off;
+    ssize_t nwrite, nxfer;
+
+    for (; psz; i++) {
+        assert(i < m->nfiles);
+        fsz = m->files[i].sz;
+        if (lseek(m->files[i].fd, pfoff, SEEK_SET) == -1) {
+            bt_errno = BT_ELSEEK;
+            return -1;
+        }
+        fsz -= pfoff;
+        nwrite = MIN(fsz, psz);
+        if ((nxfer = writen(m->files[i].fd, src, nwrite)) < nwrite) {
+            bt_errno = BT_EREAD;
+            return -1;
+        }
+        pfoff = 0;
+        psz -= nwrite, src += nwrite;
+    }
+
+    pthread_mutex_unlock(&p->lock);
+    return 0;
+}
 // int
 // main(int argc, char *argv[])
 //{

@@ -3,7 +3,7 @@
 
 #include <error.h>
 
-#define MAX_TRACKERS 64
+#define MAX_TRACKERS 256
 typedef struct bt_torrent *BT_Torrent;
 
 enum {

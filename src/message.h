@@ -21,6 +21,20 @@ enum {
     BT_MSG_CNT
 };
 
+local const char *msg_names[] = {
+        [BT_MCHOKE] = "BT_MCHOKE",
+        [BT_MUNCHOKE] = "BT_MUNCHOKE",
+        [BT_MINTERESTED] = "BT_MINTERESTED",
+        [BT_MNOT_INTERESTED] = "BT_MNOT_INTERESTED",
+        [BT_MHAVE] = "BT_MHAVE",
+        [BT_MBITFIELD] = "BT_MBITFIELD",
+        [BT_MREQUEST] = "BT_MREQUEST",
+        [BT_MPIECE] = "BT_MPIECE",
+        [BT_MCANCEL] = "BT_MCANCEL",
+        [BT_MPORT] = "BT_MPORT",
+        [BT_MKEEP_ALIVE] = "BT_MKEEP_ALIVE",
+};
+
 #define BT_MSG_LEN 5
 struct bt_msg {
     u32 len;

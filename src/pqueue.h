@@ -31,5 +31,7 @@ bt_pqueue_remove(BT_PQueue q);
 
 #define pq_isempty(pq) ((pq)->n == 0)
 
+#define pq_min(pq) ((pq)->v[1].k)
+
 
 #endif

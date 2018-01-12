@@ -64,13 +64,17 @@ cleanup:
     return NULL;
 }
 
-local int
-interested_test(BT_Bitset peer, struct bt_piece own[], size_t n)
+local void
+fill_queue(BT_PQueue q, BT_Bitset peer, struct bt_piece own[],
+           size_t n)
 {
-    while (n--)
-        if (bt_bitset_get(peer, n) && !own[n].have)
-            return 1;
-    return 0;
+    while (n--) {
+        if (!bt_bitset_get(peer, n))
+            continue;
+        own[n].freq++;
+        if (!own[n].have)
+            assert(bt_pqueue_insert(q, n, own[n].freq) != -1);
+    }
 }
 
 local void *
@@ -85,6 +89,9 @@ thread_func(struct thread_data *tdata)
 
     p->pieces = bt_bitset_new(t->npieces);
     if (!p->pieces)
+        goto cleanup;
+    p->requestq = bt_pqueue_new(t->npieces);
+    if (!p->requestq)
         goto cleanup;
 
     struct bt_msg_handshake hshk;
@@ -108,7 +115,6 @@ thread_func(struct thread_data *tdata)
     struct bt_msg *msg;
 
     while ((msg = bt_msg_recv(p->sockfd))) {
-        printf("msg id:%u\n", msg->id);
         switch (msg->id) {
         case BT_MKEEP_ALIVE:
             break;
@@ -120,6 +126,7 @@ thread_func(struct thread_data *tdata)
             break;
         case BT_MUNCHOKE:
             p->peer_choking = 0;
+            puts("got unchoked");
             break;
         case BT_MNOT_INTERESTED:
             p->peer_interested = 0;
@@ -132,28 +139,73 @@ thread_func(struct thread_data *tdata)
             }
             bt_bitset_read_arr(p->pieces, bfield->bitfield,
                                bfield->len - 1);
+            fill_queue(p->requestq, p->pieces, t->piecetab,
+                       t->npieces);
         } break;
         case BT_MHAVE: {
             struct bt_msg_have *have = (void *)msg;
-            bt_bitset_set(p->pieces, have->piecei);
+            size_t i = have->piecei;
+            int freq = ++t->piecetab[i].freq;
+            bt_bitset_set(p->pieces, i);
+            if (!t->piecetab[i].have)
+                assert(bt_pqueue_insert(p->requestq, i, freq) != -1);
         } break;
         case BT_MREQUEST:
             break;
-        case BT_MPIECE:
-            break;
+        case BT_MPIECE: {
+            struct bt_msg_piece *mpiece = (void *)msg;
+            u32 pi = mpiece->piecei;
+            u32 ci = mpiece->begin / CHUNK_SZ;
+            if (mpiece->len - 9 != CHUNK_SZ) {
+                puts("chunk size not matching request size");
+                goto cleanup;
+            }
 
+            bt_piece_fprint(stdout, &t->piecetab[pi]);
+            if (bt_piece_add_chunk(&t->piecetab[pi], ci,
+                                   mpiece->block) < 0) {
+                puts("error allocating piece");
+                return NULL;
+            }
+            if (t->piecetab[pi].have) {
+                if (bt_piece_check(&t->piecetab[pi])) {
+                    bt_pqueue_remove(p->requestq);
+                    t->piecetab[pi].freq++;
+                    if (bt_disk_write_piece(t->piecetab[pi].data,
+                                            t->mgr,
+                                            &t->piecetab[pi]) < 0) {
+                        puts("error writing piece to disk");
+                    }
+                } else {
+                    puts("bad hash !");
+                }
+            }
+        } break;
         default:
             assert(0);
         }
-        if (msg->id == BT_MBITFIELD || msg->id == BT_MHAVE) {
+        if (!pq_isempty(p->requestq)) {
             if (!p->am_interested) {
-                if (interested_test(p->pieces, t->piecetab,
-                                    t->npieces)) {
-                    p->am_interested = 1;
-                    puts("interested!");
-                    // bt_msg_send(p->sockfd, BT_MINTERESTED);
+                p->am_interested = 1;
+                bt_msg_send(p->sockfd, BT_MINTERESTED);
+            } else if (!p->peer_choking) {
+
+                unsigned piecei = pq_min(p->requestq);
+                BT_Piece piece = &t->piecetab[piecei];
+                size_t off = bt_piece_empty_chunk(piece) * CHUNK_SZ;
+                size_t len = MIN(off + CHUNK_SZ, piece->length) - off;
+
+                if (off >= piece->length) {
+                    bt_pqueue_remove(p->requestq);
+                } else {
+                    bt_msg_send(p->sockfd, BT_MREQUEST, piecei,
+                                (unsigned)off, (unsigned)len);
+                    printf("request for piece %u\n", piecei);
                 }
             }
+        } else if (p->am_interested) {
+            p->am_interested = 0;
+            bt_msg_send(p->sockfd, BT_MNOT_INTERESTED);
         }
         bt_msg_free(msg);
     }
@@ -161,6 +213,7 @@ thread_func(struct thread_data *tdata)
 cleanup:
     close(p->sockfd);
     free(p->pieces);
+    free(p->requestq);
     free(p);
     return NULL;
 }

@@ -16,10 +16,10 @@
 
 local struct bt_msg prepared[] = {
         [BT_MKEEP_ALIVE] = {0, BT_MKEEP_ALIVE},
-        [BT_MCHOKE] = {1, BT_MKEEP_ALIVE},
-        [BT_MUNCHOKE] = {1, BT_MKEEP_ALIVE},
-        [BT_MINTERESTED] = {1, BT_MKEEP_ALIVE},
-        [BT_MNOT_INTERESTED] = {1, BT_MKEEP_ALIVE}};
+        [BT_MCHOKE] = {1, BT_MCHOKE},
+        [BT_MUNCHOKE] = {1, BT_MUNCHOKE},
+        [BT_MINTERESTED] = {1, BT_MINTERESTED},
+        [BT_MNOT_INTERESTED] = {1, BT_MNOT_INTERESTED}};
 
 
 struct bt_msg *
@@ -52,12 +52,8 @@ bt_msg_new(int id, ...)
 void
 bt_msg_free(struct bt_msg *m)
 {
-    if (m->id < BT_MHAVE)
+    if (m->id < BT_MHAVE || m->id == BT_MKEEP_ALIVE)
         return;
-    if (m->id == BT_MPIECE) {
-        struct bt_msg_piece *pm = (void *)m;
-        free(pm->block);
-    }
     free(m);
 }
 
@@ -141,6 +137,58 @@ bt_handshake_recv(struct bt_msg_handshake *hshk, int sockfd)
             goto cleanup;                                    \
         }                                                    \
     } while (0)
+
+#define safe_writen(fd, buf, len)                             \
+    do {                                                      \
+        if (writen((fd), (buf), (len)) != ((ssize_t)(len))) { \
+            bt_errno = BT_ENETRECV;                           \
+            goto cleanup;                                     \
+        }                                                     \
+    } while (0)
+
+int
+bt_msg_send(int sockfd, int id, ...)
+{
+    char buf[128];
+    va_list ap;
+    va_start(ap, id);
+
+    if (id < BT_MHAVE) {
+        u32 len = prepared[id].len;
+        PUT_U32BE(buf, len);
+        buf[4] = id;
+        safe_writen(sockfd, buf, len + 4);
+    } else {
+        switch (id) {
+        case BT_MKEEP_ALIVE:
+            PUT_U32BE(buf, 0);
+            safe_writen(sockfd, buf, 4);
+            break;
+        case BT_MREQUEST: {
+            u32 len = 13;
+            u32 piecei = va_arg(ap, u32);
+            u32 begin = va_arg(ap, u32);
+            u32 length = va_arg(ap, u32);
+
+            PUT_U32BE(buf, len);
+            buf[4] = id;
+            PUT_U32BE(buf + 5, piecei);
+            PUT_U32BE(buf + 9, begin);
+            PUT_U32BE(buf + 13, length);
+            safe_writen(sockfd, buf, len + 4);
+            break;
+        }
+        default:
+            assert(0);
+        }
+    }
+
+    va_end(ap);
+    return 0;
+cleanup:
+    va_end(ap);
+    return -1;
+}
 
 struct bt_msg *
 bt_msg_recv(int sockfd)
