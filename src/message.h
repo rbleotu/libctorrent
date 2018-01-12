@@ -84,7 +84,7 @@ struct bt_msg *
 bt_msg_recv(int sockfd);
 
 int
-bt_msg_send(struct bt_msg *msg, int sockfd);
+bt_msg_send(int sockfd, int id, ...);
 
 void
 bt_msg_free(struct bt_msg *msg);
