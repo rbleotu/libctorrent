@@ -13,7 +13,7 @@ OBJ ::=  $(patsubst %.c, $(OBJ_DIR)/%.o, $(notdir $(SRC)))
 TARGET ::= a.out
 ######## BUILD OPTIONS ########
 CC ?= gcc
-CFLAGS ::= -Wall -Wextra\
+CFLAGS ::= -std=c99 -Wpedantic -Wall -Wextra\
 	-Wno-unused-variable -Wno-unused-parameter -pthread\
 	-Wno-unused-function -I$(SRC_DIR)
 ########     RULES     ########
