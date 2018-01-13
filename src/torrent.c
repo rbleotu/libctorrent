@@ -100,7 +100,7 @@ build_path(BT_BCode b, ...)
 {
 #define INIT_SZ 16
 #define INCR_SZ 32
-    assert(B_ISLIST(b));
+    assert(b_islist(b));
 
     va_list ap;
     char *res;
@@ -115,20 +115,19 @@ build_path(BT_BCode b, ...)
         return NULL;
 
     i = sz - 1;
-    res[i++] = '/';
 
-    for (size_t n = 0; !B_ISNIL(s = bt_bcode_get(b, n)); n++) {
-        if (!B_ISSTRING(s))
+    for (size_t n = 0; !b_isnil(s = bt_bcode_get(b, n)); n++) {
+        if (!b_isstring(s))
             break;
-        format_check(B_ISSTRING(s));
-        if (i + B_STRING(s)->len + 2 >= sz) {
-            sz = i + B_STRING(s)->len + 2 + INCR_SZ;
+        format_check(b_isstring(s));
+        size_t len = s.u.string->len;
+        res[i++] = '/';
+        if (i + len + 2 >= sz) {
+            sz = i + len + 2 + INCR_SZ;
             safe_realloc(res, sz);
         }
-        memcpy(res + i, B_STRING(s)->content, B_STRING(s)->len);
-        i += B_STRING(s)->len;
-        if (B_ISSTRING(bt_bcode_get(b, n + 1)))
-            res[i++] = '/';
+        memcpy(res + i, b_string(s), len);
+        i += len;
     }
 
     res[i] = '\0';
@@ -149,11 +148,13 @@ local int
 init_pieces(BT_Torrent t, BT_BCode pieces)
 {
     assert(t);
+    assert(b_isstring(pieces));
+
     size_t plen = t->piece_length;
     size_t rem = t->size;
-    size_t n = B_STRING(pieces)->len / SHA1_DIGEST_LEN;
-    uint8_t(*hash_tab)[SHA1_DIGEST_LEN] =
-            (void *)B_STRING(pieces)->content;
+    size_t n = b_strlen(pieces) / SHA1_DIGEST_LEN;
+    uint8_t(*hash_tab)[SHA1_DIGEST_LEN] = (void *)b_string(pieces);
+
     for (BT_Piece i = t->piecetab; rem; ++i) {
         if (!n) {
             bt_errno = BT_EFORMAT;
@@ -172,20 +173,20 @@ get_trackers(const char *dest[], BT_BCode meta)
 {
     size_t n = 0;
     BT_BCode announce = bt_bcode_get(meta, "announce");
-    if (B_ISSTRING(announce))
-        dest[n++] = (char *)B_STRING(announce)->content;
+    if (b_isstring(announce))
+        dest[n++] = (char *)b_string(announce);
     BT_BCode anlst = bt_bcode_get(meta, "announce-list");
-    if (B_ISLIST(anlst)) {
+    if (b_islist(anlst)) {
         BT_BCode tier, tracker;
-        for (size_t i = 0; i < B_LIST(anlst)->n; i++) {
+        for (size_t i = 0; i < b_list(anlst)->n; i++) {
             tier = bt_bcode_get(anlst, i);
-            if (!B_ISLIST(tier))
+            if (!b_islist(tier))
                 continue;
-            for (size_t j = 0; j < B_LIST(tier)->n; j++) {
+            for (size_t j = 0; j < b_list(tier)->n; j++) {
                 tracker = bt_bcode_get(tier, j);
-                if (B_ISSTRING(tracker)) {
+                if (b_isstring(tracker)) {
                     assert(n < MAX_TRACKERS);
-                    dest[n++] = (char *)B_STRING(tracker)->content;
+                    dest[n++] = (void *)b_string(tracker);
                 }
             }
         }
@@ -215,14 +216,9 @@ bt_torrent_new(FILE *f, const char *outdir, unsigned short port)
 {
     assert(f);
 
-    BT_BCode meta;
-    BT_BCode info;
-    BT_BCode files;
-    BT_BCode name;
-    BT_BCode piece_length;
-    BT_BCode pieces;
+    BT_BCode meta, info, files;
+    BT_BCode name, piece_length, pieces;
 
-    char *path;
     const char *name_str;
     off_t sz;
 
@@ -234,56 +230,54 @@ bt_torrent_new(FILE *f, const char *outdir, unsigned short port)
 
     if (bt_bdecode_file(&meta, f) < 0)
         goto cleanup;
-    format_check(B_ISDICT(meta));
+    format_check(b_isdict(meta));
 
     info = bt_bcode_get(meta, "info");
-    format_check(B_ISDICT(info));
+    format_check(b_isdict(info));
 
     name = bt_bcode_get(info, "name");
-    format_check(B_ISSTRING(name));
+    format_check(b_isstring(name));
 
     piece_length = bt_bcode_get(info, "piece length");
-    format_check(B_ISNUM(piece_length));
+    format_check(b_isnum(piece_length));
 
     pieces = bt_bcode_get(info, "pieces");
-    format_check(B_ISSTRING(pieces));
+    format_check(b_isstring(pieces));
 
-    t->piece_length = B_NUM(piece_length);
+    t->piece_length = b_num(piece_length);
 
-    t->mgr = bt_disk_new(128);
+    t->mgr = bt_disk_new(30);
     if (!t->mgr)
         goto cleanup;
 
-    name_str = (char *)B_STRING(name)->content;
 
-    if (B_ISLIST(files = bt_bcode_get(info, "files"))) {
+    if (b_islist(files = bt_bcode_get(info, "files"))) {
         t->size = 0;
-        for (size_t i = 0;; i++) {
-            BT_BCode tmp = bt_bcode_get(files, i);
-            if (B_ISNIL(tmp))
-                break;
-            format_check(B_ISDICT(tmp));
+        BT_BCode file, path;
+        char *path_str;
+        for (size_t i = 0; !b_isnil(file = bt_bcode_get(files, i));
+             i++) {
+            format_check(b_isdict(file));
 
-            tmp = bt_bcode_get(tmp, "path");
-            format_check(B_ISLIST(tmp));
+            path = bt_bcode_get(file, "path");
+            format_check(b_islist(path));
 
-            if (!(path = build_path(tmp, outdir, name_str, NULL))) {
+            if (!(path_str = build_path(path, outdir, b_string(name),
+                                        NULL)))
                 goto cleanup;
-            }
 
-            sz = B_NUM(
-                    bt_bcode_get(bt_bcode_get(files, i), "length"));
+            sz = b_num(bt_bcode_get(file, "length"));
+
             t->size += sz;
 
-            if (bt_disk_add_file(t->mgr, path, sz) < 0)
+            if (bt_disk_add_file(t->mgr, path_str, sz) < 0)
                 goto cleanup;
         }
     } else {
         char path[256];
-        sz = B_NUM(bt_bcode_get(info, "length"));
+        sz = b_num(bt_bcode_get(info, "length"));
 
-        snprintf(path, sizeof(path), "%s/%s", outdir,
-                 (char *)B_STRING(name)->content);
+        snprintf(path, sizeof(path), "%s/%s", outdir, b_string(name));
 
         if (bt_disk_add_file(t->mgr, path, sz) < 0)
             goto cleanup;

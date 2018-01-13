@@ -41,10 +41,9 @@ blist_get(BT_BList lst, size_t i)
 }
 
 local int
-bstring_cmp(const struct bstring *a, const uint8_t *str, size_t len)
+bstring_cmp(const uint8_t *a, size_t n, const uint8_t *b, size_t m)
 {
-    size_t m = MIN(a->len, len);
-    return memcmp(a->content, str, m);
+    return memcmp(a, b, MIN(n, m));
 }
 
 local BT_BCode
@@ -54,7 +53,8 @@ bdict_get(BT_BDict dict, const uint8_t *str, size_t len)
     size_t lt = 0, rt = dict->n / 2;
     while (lt < rt) {
         size_t mid = lt + (rt - lt) / 2;
-        int cmp = bstring_cmp(B_STRING(v[mid][0]), str, len);
+        int cmp = bstring_cmp(b_string(v[mid][0]),
+                              v[mid][0].u.string->len, str, len);
         if (cmp == 0)
             return v[mid][1];
         else if (cmp < 0)
@@ -275,16 +275,16 @@ parse(BT_BParser ctx)
     switch (c) {
     case 'i':
         ret.id = BCODE_INT;
-        B_NUM(ret) = sc_read_num(ctx);
+        b_num(ret) = sc_read_num(ctx);
         EXPECT(ctx, 'e');
         break;
     case 'l':
         ret.id= BCODE_LIST;
-        B_LIST(ret) = parse_list(ctx);
+        b_list(ret) = parse_list(ctx);
         break;
     case 'd':
         ret.id = BCODE_DICT;
-        B_DICT(ret) = parse_dict(ctx);
+        b_dict(ret) = parse_dict(ctx);
         break;
     case '0':
     case '1': case '2': case '3':
@@ -292,7 +292,7 @@ parse(BT_BParser ctx)
     case '7': case '8': case '9':
         sc_unget(ctx, c);
         ret.id = BCODE_STRING;
-        B_STRING(ret) = parse_string(ctx);
+        ret.u.string = parse_string(ctx);
         break;
     default:
         throw_error(ctx, BT_ESYNTAX);
@@ -385,34 +385,34 @@ bcode_fprint(FILE *f, BT_BCode b, unsigned indent)
 {
     switch (b.id) {
     case BCODE_INT:
-        fprintf(f, "%ld", B_NUM(b));
+        fprintf(f, "%ld", b_num(b));
         break;
     case BCODE_STRING:
-        bstring_fprint(f, B_STRING(b));
+        bstring_fprint(f, b.u.string);
         break;
     case BCODE_LIST:
         fputc('[', f);
-        for (size_t i = 0; i < B_LIST(b)->n; i++) {
+        for (size_t i = 0; i < b_list(b)->n; i++) {
             if (i)
                 add_indent(f, indent + INDENT_LVL);
-            bcode_fprint(f, B_LIST(b)->base[i],
+            bcode_fprint(f, b_list(b)->base[i],
                          i ? indent + INDENT_LVL : 1);
-            if (i + 1 < B_LIST(b)->n)
+            if (i + 1 < b_list(b)->n)
                 fputs(",\n", f);
         }
         fputc(']', f);
         break;
     case BCODE_DICT:
         fputc('{', f);
-        for (size_t i = 0; i < B_DICT(b)->n; i += 2) {
+        for (size_t i = 0; i < b_dict(b)->n; i += 2) {
             if (i)
                 add_indent(f, indent + INDENT_LVL);
-            bcode_fprint(f, B_DICT(b)->base[i],
+            bcode_fprint(f, b_dict(b)->base[i],
                          i ? indent + INDENT_LVL : 1);
             fputc(':', f);
-            bcode_fprint(f, B_DICT(b)->base[i + 1],
+            bcode_fprint(f, b_dict(b)->base[i + 1],
                          indent + INDENT_LVL);
-            if (i + 2 < B_DICT(b)->n)
+            if (i + 2 < b_dict(b)->n)
                 fputs(",\n", f);
         }
         fputc('}', f);
@@ -438,11 +438,11 @@ bt_bcode_get(BT_BCode b, ...)
         return b;
         break;
     case BCODE_LIST:
-        return blist_get(B_LIST(b), va_arg(ap, int));
+        return blist_get(b_list(b), va_arg(ap, int));
     case BCODE_DICT: {
         uint8_t *str = va_arg(ap, uint8_t *);
         size_t len = strlen((char *)str);
-        return bdict_get(B_DICT(b), str, len);
+        return bdict_get(b_dict(b), str, len);
     }
     default:
         assert(0);
@@ -478,25 +478,25 @@ bt_bencode(uint8_t dest[], size_t len, BT_BCode b)
     char tmp[32];
     switch (b.id) {
     case BCODE_INT: {
-        res = snprintf(tmp, sizeof(tmp), "i%lde", B_NUM(b));
+        res = snprintf(tmp, sizeof(tmp), "i%lde", b_num(b));
         if (dest)
             memcpy(dest, tmp, MIN(len, res));
         return res;
     }
     case BCODE_STRING: {
-        size_t slen = B_STRING(b)->len;
+        size_t slen = b.u.string->len;
         res = snprintf(tmp, sizeof(tmp), "%zu:", slen);
         if (dest) {
             memcpy(dest, tmp, MIN(len, res));
             dest += MIN(len, res), len -= MIN(len, res);
-            memcpy(dest, B_STRING(b)->content, MIN(len, slen));
+            memcpy(dest, b_string(b), MIN(len, slen));
         }
         return res + slen;
     }
     case BCODE_LIST: {
         if (dest && len--)
             *dest++ = 'l';
-        res = bencode_array(dest, len, B_LIST(b)->base, B_LIST(b)->n);
+        res = bencode_array(dest, len, b_list(b)->base, b_list(b)->n);
         if (dest && len--)
             dest[res] = 'e';
         return res + 2;
@@ -504,7 +504,7 @@ bt_bencode(uint8_t dest[], size_t len, BT_BCode b)
     case BCODE_DICT: {
         if (dest && len--)
             *dest++ = 'd';
-        res = bencode_array(dest, len, B_DICT(b)->base, B_DICT(b)->n);
+        res = bencode_array(dest, len, b_dict(b)->base, b_dict(b)->n);
         if (dest && len--)
             dest[res] = 'e';
         return res + 2;
@@ -513,6 +513,30 @@ bt_bencode(uint8_t dest[], size_t len, BT_BCode b)
         assert(0);
     }
     return 0;
+}
+
+void
+bt_bcode_free(BT_BCode b)
+{
+    BArray a;
+    switch (b.id) {
+    case BCODE_INT:
+        return;
+    case BCODE_STRING:
+        free(b.u.string);
+        return;
+    case BCODE_DICT:
+        a = b_dict(b);
+        break;
+    case BCODE_LIST:
+        a = b_list(b);
+        break;
+    default:
+        assert(0);
+    }
+    for (size_t i = 0; i < a->n; i++)
+        bt_bcode_free(a->base[i]);
+    free(a);
 }
 
 // int

@@ -23,16 +23,18 @@ typedef struct barray *BT_BList;
 typedef struct barray *BT_BDict;
 typedef struct bstring *BT_BString;
 
-#define B_ISNIL(b) ((b).id == BCODE_NONE)
-#define B_ISNUM(b) ((b).id == BCODE_INT)
-#define B_ISSTRING(b) ((b).id == BCODE_STRING)
-#define B_ISLIST(b) ((b).id == BCODE_LIST)
-#define B_ISDICT(b) ((b).id == BCODE_DICT)
+#define b_isnil(b) ((b).id == BCODE_NONE)
+#define b_isnum(b) ((b).id == BCODE_INT)
+#define b_isstring(b) ((b).id == BCODE_STRING)
+#define b_islist(b) ((b).id == BCODE_LIST)
+#define b_isdict(b) ((b).id == BCODE_DICT)
 
-#define B_NUM(x) ((x).u.num)
-#define B_STRING(x) ((x).u.string)
-#define B_LIST(x) ((x).u.list)
-#define B_DICT(x) ((x).u.dict)
+#define b_num(x) ((x).u.num)
+#define b_string(x) ((x).u.string->content)
+#define b_list(x) ((x).u.list)
+#define b_dict(x) ((x).u.dict)
+
+#define b_strlen(x) ((x).u.string->len)
 
 
 struct bstring {
@@ -67,6 +69,9 @@ bt_bencode(OUT u8 str[], IN size_t len, IN struct bcode b);
 
 void
 bt_bcode_fprint(IN FILE *out, IN struct bcode b);
+
+void
+bt_bcode_free(BT_BCode b);
 
 BT_BCode
 bt_bcode_get(IN BT_BCode b, ...);
