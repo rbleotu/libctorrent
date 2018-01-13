@@ -17,7 +17,6 @@
 #include "net/thread.h"
 #include "torrentx.h"
 
-
 local inline unsigned
 hex_value(char h)
 {
@@ -116,18 +115,17 @@ build_path(BT_BCode b, ...)
 
     i = sz - 1;
 
-    for (size_t n = 0; !b_isnil(s = bt_bcode_get(b, n)); n++) {
+    for (size_t n = 0; !b_isnil(s = bt_bcode_get(b, n++));) {
         if (!b_isstring(s))
             break;
+        const size_t len = s.u.string->len;
         format_check(b_isstring(s));
-        size_t len = s.u.string->len;
         res[i++] = '/';
-        if (i + len + 2 >= sz) {
-            sz = i + len + 2 + INCR_SZ;
+        if ((i += len) + 1 >= sz) {
+            sz = i + 1 + INCR_SZ;
             safe_realloc(res, sz);
         }
-        memcpy(res + i, b_string(s), len);
-        i += len;
+        memcpy(res + i - len, b_string(s), len);
     }
 
     res[i] = '\0';
@@ -249,7 +247,6 @@ bt_torrent_new(FILE *f, const char *outdir, unsigned short port)
     t->mgr = bt_disk_new(30);
     if (!t->mgr)
         goto cleanup;
-
 
     if (b_islist(files = bt_bcode_get(info, "files"))) {
         t->size = 0;
@@ -375,8 +372,7 @@ bt_torrent_pause(BT_Torrent t)
 extern int
 bt_torrent_check(BT_Torrent t)
 {
-    assert(t);
-    assert(t->mgr);
+    assert(t && t->mgr);
 
     uint8_t hash[SHA1_DIGEST_LEN];
 
@@ -387,18 +383,23 @@ bt_torrent_check(BT_Torrent t)
     }
 
     for (unsigned i = 0; i < t->npieces; i++) {
-        if (bt_disk_get_piece(data, t->mgr, &t->piecetab[i]) < 0)
+        if (bt_disk_get_piece(t->mgr, data, t->piecetab[i].length,
+                              t->piecetab[i].off) < 0)
             return -1;
         bt_sha1(hash, data, t->piecetab[i].length);
-        if (!memcmp(hash, t->piecetab[i].hash, SHA1_DIGEST_LEN)) {
+        if (check_hash(hash, t->piecetab[i].hash)) {
             t->piecetab[i].have = 1;
             t->size_have += t->piecetab[i].length;
             t->nhave++;
         }
     }
 
-    printf("have: %u\n", t->nhave);
-
     free(data);
     return 0;
+}
+
+extern unsigned
+bt_torrent_get_nhave(BT_Torrent t)
+{
+    return t->nhave;
 }

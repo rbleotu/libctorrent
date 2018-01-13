@@ -29,7 +29,8 @@ BT_DiskMgr
 bt_disk_new(size_t n);
 
 int
-bt_disk_get_piece(OUT u8 data[], IN BT_DiskMgr m, IN BT_Piece p);
+bt_disk_get_piece(IN BT_DiskMgr m, OUT u8 data[], IN size_t len,
+                  IN off_t off);
 
 int
 bt_disk_write_piece(IN u8 data[], IN BT_DiskMgr m, IN BT_Piece p);

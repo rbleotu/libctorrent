@@ -36,6 +36,8 @@ main(int argc, char *argv[])
         return 1;
     }
 
+    printf("have:%u\n", bt_torrent_get_nhave(t));
+
     fclose(f);
     unsigned peer;
 

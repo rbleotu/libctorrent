@@ -41,4 +41,6 @@ bt_torrent_free(BT_Torrent t);
 extern void
 bt_torrent_add_action(BT_Torrent t, int ev, void *h);
 
+extern unsigned
+bt_torrent_get_nhave(BT_Torrent t);
 #endif
