@@ -17,6 +17,8 @@
 #include "../error.h"
 #include "disk.h"
 
+local pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+
 BT_DiskMgr
 bt_disk_new(size_t n)
 {
@@ -128,7 +130,7 @@ readn(int fd, void *vptr, size_t n)
 }
 
 int
-bt_disk_get_piece(IN BT_DiskMgr m, u8 data[], size_t len, off_t off)
+bt_disk_read_piece(IN BT_DiskMgr m, u8 data[], size_t len, off_t off)
 {
     assert(m && data);
 
@@ -186,37 +188,34 @@ writen(int fd, const void *vptr, size_t n)
 }
 
 int
-bt_disk_write_piece(uint8_t src[], BT_DiskMgr m, BT_Piece p)
+bt_disk_write_piece(IN BT_DiskMgr m, u8 data[], size_t len, off_t off)
 {
-    assert(p);
-    assert(src);
-    assert(m);
-    pthread_mutex_lock(&p->lock);
+    assert(m && data);
 
-    size_t i = file_from_offset(m->files, m->nfiles, p->off);
-    size_t psz = p->length;
-    size_t fsz;
-    size_t pfoff = p->off - m->files[i].off;
+    size_t i = file_from_offset(m->files, m->nfiles, off);
     ssize_t nwrite, nxfer;
+    off -= m->files[i].off;
 
-    for (; psz; i++) {
+    pthread_mutex_lock(&lock);
+    for (; len; off = 0, i++) {
         assert(i < m->nfiles);
-        fsz = m->files[i].sz;
-        if (lseek(m->files[i].fd, pfoff, SEEK_SET) == -1) {
+
+        if (lseek(m->files[i].fd, off, SEEK_SET) == -1) {
             bt_errno = BT_ELSEEK;
             return -1;
         }
-        fsz -= pfoff;
-        nwrite = MIN(fsz, psz);
-        if ((nxfer = writen(m->files[i].fd, src, nwrite)) < nwrite) {
+        size_t fsz = m->files[i].sz - off;
+        nwrite = MIN(fsz, len);
+        if ((nxfer = writen(m->files[i].fd, data, nwrite)) < nwrite) {
             bt_errno = BT_EREAD;
             return -1;
         }
-        pfoff = 0;
-        psz -= nwrite, src += nwrite;
-    }
 
-    pthread_mutex_unlock(&p->lock);
+        off = 0;
+        len -= nwrite, data += nwrite;
+    }
+    pthread_mutex_unlock(&lock);
+
     return 0;
 }
 // int

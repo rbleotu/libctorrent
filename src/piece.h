@@ -37,4 +37,10 @@ bt_piece_check(BT_Piece p);
 void
 bt_piece_fprint(FILE *to, BT_Piece p);
 
+int
+bt_piece_load(BT_Piece p, BT_DiskMgr m);
+
+int
+bt_piece_save(BT_Piece p, BT_DiskMgr m);
+
 #endif

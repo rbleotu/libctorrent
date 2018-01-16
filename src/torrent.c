@@ -383,8 +383,8 @@ bt_torrent_check(BT_Torrent t)
     }
 
     for (unsigned i = 0; i < t->npieces; i++) {
-        if (bt_disk_get_piece(t->mgr, data, t->piecetab[i].length,
-                              t->piecetab[i].off) < 0)
+        if (bt_disk_read_piece(t->mgr, data, t->piecetab[i].length,
+                               t->piecetab[i].off) < 0)
             return -1;
         bt_sha1(hash, data, t->piecetab[i].length);
         if (check_hash(hash, t->piecetab[i].hash)) {

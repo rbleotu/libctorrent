@@ -191,6 +191,52 @@ cleanup:
 }
 
 struct bt_msg *
+bt_msg_unpack(const u8 buf[])
+{
+    u32 len, id;
+    GET_U32BE(buf, len);
+    if (!len)
+        return &prepared[BT_MKEEP_ALIVE];
+    id = buf[4];
+    if (id < BT_MHAVE)
+        return &prepared[id];
+
+    struct bt_msg *msg = bt_malloc(len + 4);
+    if (!msg) {
+        bt_errno = BT_EALLOC;
+        return NULL;
+    }
+
+    msg->len = len;
+    msg->id = id;
+
+    switch (id) {
+    case BT_MHAVE: {
+        struct bt_msg_have *have = (void *)msg;
+        GET_U32BE(buf + BT_MSG_LEN, have->piecei);
+    } break;
+    case BT_MBITFIELD: {
+        struct bt_msg_bitfield *bfield = (void *)msg;
+        memcpy(bfield->bitfield, buf + 5, len - 1);
+    } break;
+    case BT_MREQUEST: {
+        struct bt_msg_request *req = (void *)msg;
+        GET_U32BE(buf + BT_MSG_LEN, req->piecei);
+        GET_U32BE(buf + BT_MSG_LEN + 4, req->begin);
+        GET_U32BE(buf + BT_MSG_LEN + 8, req->length);
+    } break;
+    case BT_MPIECE: {
+        struct bt_msg_piece *piece = (void *)msg;
+        GET_U32BE(buf + BT_MSG_LEN, piece->piecei);
+        GET_U32BE(buf + BT_MSG_LEN + 4, piece->begin);
+        memcpy(piece->block, buf, len - 9);
+    } break;
+    }
+
+    return msg;
+}
+
+struct bt_msg *
 bt_msg_recv(int sockfd)
 {
     u8 buf[128];

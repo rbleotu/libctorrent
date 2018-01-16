@@ -3,8 +3,6 @@
 
 #include <sys/types.h>
 #include <unistd.h>
-#include <setjmp.h>
-#include "../piece.h"
 
 typedef struct bt_diskmgr *BT_DiskMgr;
 
@@ -16,9 +14,6 @@ struct bt_file {
 
 struct bt_diskmgr {
     size_t nfiles, cap;
-
-    jmp_buf env;
-
     struct bt_file files[];
 };
 
@@ -29,14 +24,11 @@ BT_DiskMgr
 bt_disk_new(size_t n);
 
 int
-bt_disk_get_piece(IN BT_DiskMgr m, OUT u8 data[], IN size_t len,
-                  IN off_t off);
+bt_disk_read_piece(IN BT_DiskMgr m, OUT u8 data[], IN size_t len,
+                   IN off_t off);
 
 int
-bt_disk_write_piece(IN u8 data[], IN BT_DiskMgr m, IN BT_Piece p);
-
-int
-bt_disk_put_piece(IN BT_DiskMgr, IN const u8 *data, IN size_t len,
-                  IN off_t off);
+bt_disk_write_piece(IN BT_DiskMgr m, IN u8 data[], IN size_t len,
+                    IN off_t off);
 
 #endif

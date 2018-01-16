@@ -38,6 +38,7 @@ bt_piece_add_chunk(BT_Piece p, size_t i, u8 data[])
 {
     size_t off = i * CHUNK_SZ;
     size_t chlen = MIN(off + CHUNK_SZ, p->length) - off;
+    pthread_mutex_lock(&p->lock);
     bt_bitset_set(p->chunks, i);
     if (!p->data) {
         p->data = bt_malloc(p->length);
@@ -46,6 +47,7 @@ bt_piece_add_chunk(BT_Piece p, size_t i, u8 data[])
             return -1;
         }
     }
+    pthread_mutex_unlock(&p->lock);
     memcpy(p->data + off, data, chlen);
     size_t n = 0, nc = CEIL_DIV(p->length, CHUNK_SZ);
     for (; n < nc; n++)
@@ -78,6 +80,26 @@ bt_piece_fprint(FILE *to, BT_Piece p)
             putc(' ', to);
     }
     fputs("]\n", to);
+}
+
+int
+bt_piece_load(BT_Piece p, BT_DiskMgr m)
+{
+    assert(p && m);
+    if (!p->data) {
+        p->data = bt_malloc(p->length);
+        if (!p->data)
+            return -1;
+    }
+    return bt_disk_read_piece(m, p->data, p->length, p->off);
+}
+
+int
+bt_piece_save(BT_Piece p, BT_DiskMgr m)
+{
+    assert(p && m && p->data);
+    int err = bt_disk_write_piece(m, p->data, p->length, p->off);
+    return err;
 }
 
 // int

@@ -3,6 +3,7 @@
 
 #include "disk/disk.h"
 #include "crypt/sha1.h"
+#include "piece.h"
 #include "torrent.h"
 #include "common.h"
 
@@ -17,6 +18,7 @@ struct bt_torrent {
 
     unsigned naddr;
     struct bt_peer_addr *addrtab;
+
     unsigned short port;
 
     size_t piece_length;

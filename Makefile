@@ -5,6 +5,7 @@ SRC ::= crypt/sha1.c bcode/bcode.c torrent.c \
 	disk/disk.c\
 	tracker/tracker.c tracker/tracker_udp.c\
 	net/thread.c message.c piece.c\
+	net/timer_queue.c net/thread_msg.c\
 	bitset.c pqueue.c\
 	error.c main.c
 

@@ -103,4 +103,6 @@ bt_msg_send(int sockfd, int id, ...);
 void
 bt_msg_free(struct bt_msg *msg);
 
+struct bt_msg *
+bt_msg_unpack(const u8 buf[]);
 #endif
