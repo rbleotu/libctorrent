@@ -4,6 +4,8 @@
 #include <assert.h>
 #include <errno.h>
 #include <assert.h>
+#include <stdarg.h>
+#include <time.h>
 
 #include <torrent.h>
 
@@ -14,8 +16,50 @@ piece_received(BT_Torrent t)
     bt_torrent_pause(t);
 }
 
+static char *
+sprinttime(char dest[], size_t n)
+{
+    time_t t = time(NULL);
+
+    struct tm *timebuf = localtime(&t);
+    if (!timebuf)
+        return "??:??:??";
+
+    strftime(dest, n, "%T", timebuf);
+    return dest;
+}
+
+static void
+cli_logger(int type, const char *fmt, ...)
+{
+    char strtime[16];
+    size_t len = strlen(fmt);
+    va_list ap;
+
+    switch (type) {
+    case BT_LOG_WARN:
+        fprintf(stderr, "[\033[1;33mWARNING\033[0m %8s] ", sprinttime(strtime, sizeof(strtime)));
+        break;
+    case BT_LOG_ERROR:
+        fprintf(stderr, "[\033[1;31m ERROR \033[0m %8s] ", sprinttime(strtime, sizeof(strtime)));
+        break;
+    case BT_LOG_INFO:
+    default:
+        fprintf(stderr, "[\033[1;34m INFO  \033[0m %8s] ", sprinttime(strtime, sizeof(strtime)));
+        break;
+    }
+
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+
+    if (len && fmt[len-1] == ':')
+        fprintf(stderr, " %s", bt_strerror());
+    putc('\n', stderr);
+}
+
 static const struct bt_settings DEFAULT_SETTINGS = {
-    .logger        = {NULL},
+    .logger        = {cli_logger},
     .metainfo_path = NULL,
     .port      = 1221,
     .outdir    = ".",
