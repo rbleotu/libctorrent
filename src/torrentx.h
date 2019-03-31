@@ -26,4 +26,9 @@ struct bt_torrent {
     struct bt_piece piecetab[];
 };
 
+#define logx(t, x, ...) ((t)->settings.logger.log ? (t)->settings.logger.log(x, __VA_ARGS__) : (void) 0)
+#define log_info(t, ...) logx(t,  BT_LOG_INFO, __VA_ARGS__)
+#define log_warn(t, ...) logx(t,  BT_LOG_WARN, __VA_ARGS__)
+#define log_error(t, ...) logx(t, BT_LOG_ERROR, __VA_ARGS__)
+
 #endif

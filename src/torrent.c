@@ -236,8 +236,12 @@ from_metainfo_file(BT_Torrent t, const char *path)
     name = bt_bcode_get(info, "name");
     format_check(b_isstring(name));
 
+    log_info(t, "metainfo.name: '%s'", (char *)b_string(name));
+
     piece_length = bt_bcode_get(info, "piece length");
     format_check(b_isnum(piece_length));
+
+    log_info(t, "metainfo.plen: %uB", b_num(piece_length));
 
     pieces = bt_bcode_get(info, "pieces");
     format_check(b_isstring(pieces));
@@ -263,8 +267,9 @@ from_metainfo_file(BT_Torrent t, const char *path)
                 goto error;
 
             sz = b_num(bt_bcode_get(file, "length"));
-
             t->size += sz;
+
+            log_info(t, "file: %30s size: %8u", path, sz);
 
             if (bt_disk_add_file(t->mgr, path_str, sz) < 0)
                 goto error;
@@ -275,22 +280,26 @@ from_metainfo_file(BT_Torrent t, const char *path)
 
         snprintf(path, sizeof(path), "%s/%s", outdir, b_string(name));
 
+        log_info(t, "file: %30s size: %8u", b_string(name), sz);
+
         if (bt_disk_add_file(t->mgr, path, sz) < 0)
             goto error;
     }
 
     t->npieces = CEIL_DIV(t->size, t->piece_length);
-    printf("npieces: %u\n", t->npieces);
 
     safe_realloc(t, sizeof(*t) + sizeof(struct bt_piece[t->npieces]));
 
     if (init_pieces(t, pieces) < 0)
         goto error;
 
-    if (get_trackers(t->announce, meta) == 0) {
+    size_t ntrackers = get_trackers(t->announce, meta);
+    if (!ntrackers) {
         bt_errno = BT_ENOTRACKER;
         goto error;
     }
+
+    log_info(t, "tracker count: %u", (unsigned)ntrackers);
 
     if (compute_hash(t->info_hash, info) < 0)
         goto error;
@@ -317,6 +326,7 @@ bt_torrent_new(BT_Settings settings)
     t->settings = *settings;
 
     if (settings->metainfo_path) {
+        log_info(t, "reading metainfo from file '%s'", settings->metainfo_path);
         if (from_metainfo_file(t, settings->metainfo_path))
             goto error;
     } else {
