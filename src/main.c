@@ -14,17 +14,22 @@ piece_received(BT_Torrent t)
     bt_torrent_pause(t);
 }
 
+static const struct bt_settings DEFAULT_SETTINGS = {
+    .logger        = {NULL},
+    .metainfo_path = NULL,
+    .port      = 1221,
+    .outdir    = ".",
+    .max_peers = 32,
+};
+
 int
 main(int argc, char *argv[])
 {
-    FILE *f = freopen(argv[1], "rb", stdin);
-    if (!f) {
-        fprintf(stderr, "Failed to open '%s': %s\n", argv[1],
-                strerror(errno));
-        return 1;
-    }
+    struct bt_settings settings = DEFAULT_SETTINGS;
+    if (argv[1])
+        settings.metainfo_path = argv[1];
 
-    BT_Torrent t = bt_torrent_new(f, "./out/", 1222);
+    BT_Torrent t = bt_torrent_new(&settings);
     if (!t) {
         fprintf(stderr, "Error reading torrent '%s': %s\n", argv[1],
                 bt_strerror());
@@ -38,7 +43,6 @@ main(int argc, char *argv[])
 
     printf("have:%u\n", bt_torrent_get_nhave(t));
 
-    fclose(f);
     unsigned peer;
 
     if ((peer = bt_torrent_tracker_request(t, 20)) == 0) {

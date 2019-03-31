@@ -209,25 +209,25 @@ compute_hash(uint8_t hash[], BT_BCode b)
     return 0;
 }
 
-extern BT_Torrent
-bt_torrent_new(FILE *f, const char *outdir, unsigned short port)
+local int
+from_metainfo_file(BT_Torrent t, const char *path)
 {
-    assert(f);
-
     BT_BCode meta, info, files;
     BT_BCode name, piece_length, pieces;
 
+    const char * const outdir = t->settings.outdir;
     const char *name_str;
     off_t sz;
 
-    BT_Torrent t = bt_torrent_alloc();
-    if (!t)
-        return NULL;
-
-    t->port = port;
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        bt_errno = BT_EOPEN;
+        return -1;
+    }
 
     if (bt_bdecode_file(&meta, f) < 0)
-        goto cleanup;
+        goto error;
+
     format_check(b_isdict(meta));
 
     info = bt_bcode_get(meta, "info");
@@ -246,7 +246,7 @@ bt_torrent_new(FILE *f, const char *outdir, unsigned short port)
 
     t->mgr = bt_disk_new(30);
     if (!t->mgr)
-        goto cleanup;
+        goto error;
 
     if (b_islist(files = bt_bcode_get(info, "files"))) {
         t->size = 0;
@@ -259,16 +259,15 @@ bt_torrent_new(FILE *f, const char *outdir, unsigned short port)
             path = bt_bcode_get(file, "path");
             format_check(b_islist(path));
 
-            if (!(path_str = build_path(path, outdir, b_string(name),
-                                        NULL)))
-                goto cleanup;
+            if (!(path_str = build_path(path, outdir, b_string(name), NULL)))
+                goto error;
 
             sz = b_num(bt_bcode_get(file, "length"));
 
             t->size += sz;
 
             if (bt_disk_add_file(t->mgr, path_str, sz) < 0)
-                goto cleanup;
+                goto error;
         }
     } else {
         char path[256];
@@ -277,7 +276,7 @@ bt_torrent_new(FILE *f, const char *outdir, unsigned short port)
         snprintf(path, sizeof(path), "%s/%s", outdir, b_string(name));
 
         if (bt_disk_add_file(t->mgr, path, sz) < 0)
-            goto cleanup;
+            goto error;
     }
 
     t->npieces = CEIL_DIV(t->size, t->piece_length);
@@ -286,22 +285,46 @@ bt_torrent_new(FILE *f, const char *outdir, unsigned short port)
     safe_realloc(t, sizeof(*t) + sizeof(struct bt_piece[t->npieces]));
 
     if (init_pieces(t, pieces) < 0)
-        goto cleanup;
+        goto error;
 
     if (get_trackers(t->announce, meta) == 0) {
         bt_errno = BT_ENOTRACKER;
-        goto cleanup;
+        goto error;
     }
 
     if (compute_hash(t->info_hash, info) < 0)
-        goto cleanup;
+        goto error;
+
+    fclose(f);
+    return 0;
+alloc_error:
+format_error:
+error:
+    fclose(f);
+    return -1;
+}
+
+extern BT_Torrent
+bt_torrent_new(BT_Settings settings)
+{
+    assert (settings != NULL);
+
+
+    BT_Torrent t = bt_torrent_alloc();
+    if (!t)
+        return NULL;
+
+    t->settings = *settings;
+
+    if (settings->metainfo_path) {
+        if (from_metainfo_file(t, settings->metainfo_path))
+            goto error;
+    } else {
+        assert (!"TODO: magnet links");
+    }
 
     return t;
-format_error:
-    bt_errno = BT_EFORMAT;
-    return NULL;
-alloc_error:
-cleanup:
+error:
     bt_free(t);
     return NULL;
 }
@@ -320,12 +343,14 @@ bt_torrent_tracker_request(BT_Torrent t, unsigned npeer)
     safe_realloc(t->addrtab,
                  sizeof(t->addrtab[0]) * (t->naddr + npeer));
 
-    req = (struct tracker_request){.downloaded = 0,
-                                   .left = t->size - t->size_have,
-                                   .uploaded = 0,
-                                   .num_want = npeer,
-                                   .event = 0,
-                                   .port = t->port};
+    req = (struct tracker_request){
+        .downloaded = 0,
+        .left       = t->size - t->size_have,
+        .uploaded   = 0,
+        .num_want   = npeer,
+        .event      = 0,
+        .port       = t->settings.port
+    };
     resp = (struct tracker_response){.peertab =
                                              t->addrtab + t->naddr};
     memcpy(req.info_hash, t->info_hash, SHA1_DIGEST_LEN);
@@ -344,7 +369,6 @@ bt_torrent_tracker_request(BT_Torrent t, unsigned npeer)
 alloc_error:
     return -1;
 }
-
 
 extern void
 bt_torrent_add_action(BT_Torrent t, int ev, void *h)

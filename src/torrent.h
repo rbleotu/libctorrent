@@ -2,6 +2,7 @@
 #define TORRENT_H_
 
 #include <error.h>
+#include <logger.h>
 
 #define MAX_TRACKERS 256
 typedef struct bt_torrent *BT_Torrent;
@@ -20,8 +21,22 @@ enum {
     BT_EVENT_CNT
 };
 
+struct bt_settings {
+    BT_Logger logger;
+
+    const char *metainfo_path;
+
+    unsigned port;
+
+    const char *outdir;
+
+    unsigned max_peers;
+};
+
+typedef struct bt_settings *BT_Settings;
+
 extern BT_Torrent
-bt_torrent_new(FILE *fin, const char *outdir, unsigned short port);
+bt_torrent_new(BT_Settings settings);
 
 extern int
 bt_torrent_start(BT_Torrent t);
