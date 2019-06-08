@@ -70,8 +70,9 @@ int
 main(int argc, char *argv[])
 {
     struct bt_settings settings = DEFAULT_SETTINGS;
-    if (argv[1])
+    if (argv[1]) {
         settings.metainfo_path = argv[1];
+    }
 
     BT_Torrent t = bt_torrent_new(&settings);
     if (!t) {

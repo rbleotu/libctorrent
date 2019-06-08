@@ -15,12 +15,12 @@
 #include <setjmp.h>
 #include <errno.h>
 
-#include "../common.h"
-#include "../error.h"
-#include "../torrentx.h"
-#include "../peer.h"
-#include "../message.h"
-#include "../piece.h"
+#include "util/common.h"
+#include "util/error.h"
+#include "torrentx.h"
+#include "peer.h"
+#include "message.h"
+#include "piece.h"
 #include "thread_msg.h"
 #include "timer_queue.h"
 

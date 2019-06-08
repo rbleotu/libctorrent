@@ -8,8 +8,8 @@
 #include <assert.h>
 #include <string.h>
 
-#include "../error.h"
-#include "../common.h"
+#include "util/error.h"
+#include "util/common.h"
 #include "timer_queue.h"
 
 local volatile sig_atomic_t got_alarm;

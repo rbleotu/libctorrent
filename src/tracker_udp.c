@@ -13,8 +13,8 @@
 #include <string.h>
 #include <errno.h>
 
-#include "../common.h"
-#include "../error.h"
+#include "util/common.h"
+#include "util/error.h"
 #include "tracker.h"
 
 #define CONREQ_LEN 16

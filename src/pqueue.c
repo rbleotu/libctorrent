@@ -3,8 +3,8 @@
 #include <string.h>
 #include <assert.h>
 
-#include "common.h"
-#include "error.h"
+#include "util/common.h"
+#include "util/error.h"
 #include "pqueue.h"
 
 BT_PQueue

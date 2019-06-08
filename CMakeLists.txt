@@ -16,21 +16,21 @@ find_package (Threads REQUIRED)
 add_executable (tget)
 target_sources (tget
     PRIVATE
-        src/bcode/bcode.c
+        src/bcode.c
         src/bitset.c
         src/crypt/sha1.c
-        src/disk/disk.c
-        src/error.c
+        src/disk.c
+        src/util/error.c
         src/main.c
         src/message.c
-        src/net/thread.c
-        src/net/thread_msg.c
-        src/net/timer_queue.c
+        src/thread.c
+        src/thread_msg.c
+        src/timer_queue.c
         src/piece.c
         src/pqueue.c
         src/torrent.c
-        src/tracker/tracker.c
-        src/tracker/tracker_udp.c
+        src/tracker.c
+        src/tracker_udp.c
 )
 target_include_directories (tget PRIVATE src)
 target_link_libraries (tget PUBLIC Threads::Threads)

@@ -1,5 +1,4 @@
-#ifndef DISK_H_
-#define DISK_H_
+#pragma once
 
 #include <sys/types.h>
 #include <unistd.h>
@@ -30,5 +29,3 @@ bt_disk_read_piece(IN BT_DiskMgr m, OUT u8 data[], IN size_t len,
 int
 bt_disk_write_piece(IN BT_DiskMgr m, IN u8 data[], IN size_t len,
                     IN off_t off);
-
-#endif

@@ -13,8 +13,8 @@
 #include <stdint.h>
 #include <setjmp.h>
 
-#include "../common.h"
-#include "../error.h"
+#include "util/common.h"
+#include "util/error.h"
 #include "disk.h"
 
 local pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;

@@ -2,7 +2,7 @@
 #define BENCODING_H_
 
 #include <stdint.h>
-#include "../common.h"
+#include "util/common.h"
 
 enum {
     BCODE_NONE,

@@ -2,7 +2,7 @@
 #define TORRENT_H_
 
 #include <error.h>
-#include <logger.h>
+#include <util/logger.h>
 
 #define MAX_TRACKERS 256
 typedef struct bt_torrent *BT_Torrent;

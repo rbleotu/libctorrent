@@ -4,10 +4,10 @@
 #include <string.h>
 #include <assert.h>
 
-#include "common.h"
-#include "error.h"
+#include "util/common.h"
+#include "util/error.h"
 #include "crypt/sha1.h"
-#include "disk/disk.h"
+#include "disk.h"
 #include "piece.h"
 
 int

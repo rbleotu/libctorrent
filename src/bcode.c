@@ -8,7 +8,7 @@
 #include <errno.h>
 #include <stdarg.h>
 
-#include "../error.h"
+#include "util/error.h"
 #include "bcode.h"
 
 local BArray

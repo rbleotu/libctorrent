@@ -1,7 +1,7 @@
 #ifndef THREAD_MSG_H_
 #define THREAD_MSG_H_
 
-#include "../common.h"
+#include "util/common.h"
 
 enum {
     BT_THMSG_KEEPALIVE,

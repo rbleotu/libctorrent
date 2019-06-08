@@ -1,7 +1,7 @@
 #ifndef TRACKER_H_
 #define TRACKER_H_
 
-#include "../common.h"
+#include "util/common.h"
 
 struct tracker_request {
     u8 peer_id[20];

@@ -6,15 +6,15 @@
 #include <string.h>
 #include <stdarg.h>
 
-#include "common.h"
-#include "bcode/bcode.h"
-#include "error.h"
+#include "util/common.h"
+#include "bcode.h"
+#include "util/error.h"
 #include "crypt/sha1.h"
 #include "torrent.h"
-#include "disk/disk.h"
-#include "tracker/tracker.h"
+#include "disk.h"
+#include "tracker.h"
 #include "piece.h"
-#include "net/thread.h"
+#include "thread.h"
 #include "torrentx.h"
 
 local inline unsigned

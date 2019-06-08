@@ -9,8 +9,8 @@
 #include <stdarg.h>
 #include <assert.h>
 
-#include "common.h"
-#include "error.h"
+#include "util/common.h"
+#include "util/error.h"
 #include "bitset.h"
 #include "message.h"
 

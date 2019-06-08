@@ -1,11 +1,11 @@
 #ifndef TORRENTX_H_
 #define TORRNETX_H_
 
-#include "disk/disk.h"
+#include "disk.h"
 #include "crypt/sha1.h"
 #include "piece.h"
 #include "torrent.h"
-#include "common.h"
+#include "util/common.h"
 
 struct bt_torrent {
     struct bt_settings settings;

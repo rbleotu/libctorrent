@@ -2,7 +2,7 @@
 #define MESSAGE_H_
 
 #include "crypt/sha1.h"
-#include "common.h"
+#include "util/common.h"
 
 enum {
     BT_MCHOKE,

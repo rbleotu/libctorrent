@@ -4,8 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "common.h"
-#include "error.h"
+#include "util/common.h"
+#include "util/error.h"
 #include "bitset.h"
 
 struct bt_bitset {
