@@ -37,44 +37,44 @@ local const char *msg_names[] = {
 
 #define BT_MSG_LEN 5
 struct bt_msg {
-    u32 len;
-    i8 id;
+    uint32 len;
+    int8 id;
 };
 
 struct bt_msg_have {
-    u32 len;
-    u8 id;
-    u32 piecei;
+    uint32 len;
+    uint8 id;
+    uint32 piecei;
 };
 
 struct bt_msg_bitfield {
-    u32 len;
-    u8 id;
-    u8 bitfield[];
+    uint32 len;
+    uint8 id;
+    uint8 bitfield[];
 };
 
 struct bt_msg_request {
-    u32 len;
-    u8 id;
-    u32 piecei;
-    u32 begin;
-    u32 length;
+    uint32 len;
+    uint8 id;
+    uint32 piecei;
+    uint32 begin;
+    uint32 length;
 };
 
 struct bt_msg_piece {
-    u32 len;
-    u8 id;
-    u32 piecei;
-    u32 begin;
-    u8 block[];
+    uint32 len;
+    uint8 id;
+    uint32 piecei;
+    uint32 begin;
+    uint8 block[];
 };
 
 struct bt_msg_handshake {
-    u8 pstrlen;
-    u8 pstr[19];
-    u8 reserved[8];
-    u8 info_hash[SHA1_DIGEST_LEN];
-    u8 peer_id[20];
+    uint8 pstrlen;
+    uint8 pstr[19];
+    uint8 reserved[8];
+    uint8 info_hash[SHA1_DIGEST_LEN];
+    uint8 peer_id[20];
 };
 
 struct bt_msg *
@@ -104,5 +104,5 @@ void
 bt_msg_free(struct bt_msg *msg);
 
 struct bt_msg *
-bt_msg_unpack(const u8 buf[]);
+bt_msg_unpack(const uint8 buf[]);
 #endif

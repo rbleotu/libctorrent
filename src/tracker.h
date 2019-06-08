@@ -4,19 +4,19 @@
 #include "util/common.h"
 
 struct tracker_request {
-    u8 peer_id[20];
-    u8 info_hash[20];
-    u64 downloaded;
-    u64 left;
-    u64 uploaded;
-    u32 transaction_id;
-    u32 num_want;
-    u32 event;
-    u16 port;
+    uint8 peer_id[20];
+    uint8 info_hash[20];
+    uint64 downloaded;
+    uint64 left;
+    uint64 uploaded;
+    uint32 transaction_id;
+    uint32 num_want;
+    uint32 event;
+    uint16 port;
 };
 
 struct tracker_response {
-    u32 leechers, seeders;
+    uint32 leechers, seeders;
     struct bt_peer_addr *peertab;
 };
 

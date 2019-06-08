@@ -34,7 +34,7 @@ bt_piece_empty_chunk(BT_Piece p)
 }
 
 int
-bt_piece_add_chunk(BT_Piece p, size_t i, u8 data[])
+bt_piece_add_chunk(BT_Piece p, size_t i, uint8 data[])
 {
     size_t off = i * CHUNK_SZ;
     size_t chlen = MIN(off + CHUNK_SZ, p->length) - off;
@@ -61,7 +61,7 @@ int
 bt_piece_check(BT_Piece p)
 {
     assert(p->data);
-    u8 hash[SHA1_DIGEST_LEN];
+    uint8 hash[SHA1_DIGEST_LEN];
     bt_sha1(hash, p->data, p->length);
     if (!memcmp(hash, p->data, SHA1_DIGEST_LEN))
         return 0;

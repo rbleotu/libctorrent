@@ -66,7 +66,7 @@ bt_bitset_fprint(FILE *to, BT_Bitset set)
 }
 
 void
-bt_bitset_read_arr(BT_Bitset s, u8 v[], size_t sz)
+bt_bitset_read_arr(BT_Bitset s, uint8 v[], size_t sz)
 {
     memcpy(s->bits, v, sz);
 }

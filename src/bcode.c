@@ -316,7 +316,7 @@ bt_bdecode_file(BT_BCode *res, FILE *f)
 }
 
 extern int
-bt_bdecode_str(BT_BCode *res, const u8 *str, size_t len)
+bt_bdecode_str(BT_BCode *res, const uint8 *str, size_t len)
 {
     struct t_bparser ctx = {
             .fin = NULL, .pnext = str, .pend = str + len};
@@ -459,7 +459,7 @@ struct bencoder {
 };
 
 local size_t
-bencode_array(u8 str[], size_t len, BT_BCode v[], size_t n)
+bencode_array(uint8 str[], size_t len, BT_BCode v[], size_t n)
 {
     size_t res = 0;
     for (size_t tmp, i = 0; i < n; ++i) {

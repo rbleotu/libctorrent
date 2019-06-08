@@ -48,7 +48,7 @@ timer_get(void)
 local void
 alarm_handler(int sig)
 {
-    u8 x = 1;
+    uint8 x = 1;
     got_alarm = 1;
     write(pipefd[1], &x, 1);
 }
@@ -139,7 +139,7 @@ void *
 bt_timerthread(BT_TQueue q)
 {
     assert(q);
-    u8 x;
+    uint8 x;
     if (pipe(pipefd) < 0)
         return NULL;
     while (1) {

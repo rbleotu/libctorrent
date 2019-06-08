@@ -130,7 +130,7 @@ readn(int fd, void *vptr, size_t n)
 }
 
 int
-bt_disk_read_piece(IN BT_DiskMgr m, u8 data[], size_t len, off_t off)
+bt_disk_read_piece(IN BT_DiskMgr m, uint8 data[], size_t len, off_t off)
 {
     assert(m && data);
 
@@ -188,7 +188,7 @@ writen(int fd, const void *vptr, size_t n)
 }
 
 int
-bt_disk_write_piece(IN BT_DiskMgr m, u8 data[], size_t len, off_t off)
+bt_disk_write_piece(IN BT_DiskMgr m, uint8 data[], size_t len, off_t off)
 {
     assert(m && data);
 

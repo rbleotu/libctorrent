@@ -123,7 +123,7 @@ tracker_connect(OUT struct connect_response *conresp,
                 IN struct connect_request *conreq, int sockfd,
                 unsigned timeout)
 {
-    u8 buf[256];
+    uint8 buf[256];
     ssize_t xfer;
 
     pack_connect(buf, *conreq);
@@ -168,7 +168,7 @@ tracker_connect(OUT struct connect_response *conresp,
 }
 
 static inline int
-unpack_peers(u8 buf[], size_t len, struct announce_response *resp)
+unpack_peers(uint8 buf[], size_t len, struct announce_response *resp)
 {
     struct bt_peer_addr *v = resp->peers;
     int res = (len - 20) / 6;
@@ -185,7 +185,7 @@ tracker_announce(OUT struct announce_response *annresp,
                  IN struct announce_request *annreq, int sockfd,
                  unsigned timeout)
 {
-    u8 buf[256];
+    uint8 buf[256];
     ssize_t xfer;
     pack_announce(buf, *annreq);
     if (sendto(sockfd, buf, ANNREQ_LEN, 0, NULL, 0) < 0)

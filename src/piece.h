@@ -12,14 +12,14 @@ struct bt_piece {
     off_t off;
     size_t length;
 
-    u8 hash[SHA1_DIGEST_LEN];
+    uint8 hash[SHA1_DIGEST_LEN];
 
     volatile int freq;
     volatile int have;
     BT_Bitset chunks;
 
     pthread_mutex_t lock;
-    u8 *data;
+    uint8 *data;
 };
 
 int
@@ -29,7 +29,7 @@ size_t
 bt_piece_empty_chunk(BT_Piece p);
 
 int
-bt_piece_add_chunk(BT_Piece p, size_t i, u8 data[]);
+bt_piece_add_chunk(BT_Piece p, size_t i, uint8 data[]);
 
 int
 bt_piece_check(BT_Piece p);

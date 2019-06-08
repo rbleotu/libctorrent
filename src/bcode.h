@@ -62,10 +62,10 @@ int
 bt_bdecode_file(OUT struct bcode *b, IN FILE *f);
 
 int
-bt_bdecode_str(OUT struct bcode *b, IN const u8 *str, IN size_t len);
+bt_bdecode_str(OUT struct bcode *b, IN const uint8 *str, IN size_t len);
 
 size_t
-bt_bencode(OUT u8 str[], IN size_t len, IN struct bcode b);
+bt_bencode(OUT uint8 str[], IN size_t len, IN struct bcode b);
 
 void
 bt_bcode_fprint(IN FILE *out, IN struct bcode b);

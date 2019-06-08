@@ -39,7 +39,7 @@ bt_msg_new(int id, ...)
         }
         m->len = 5;
         m->id = BT_MHAVE;
-        m->piecei = va_arg(ap, u32);
+        m->piecei = va_arg(ap, uint32);
         res = m;
     } break;
     default:
@@ -154,7 +154,7 @@ bt_msg_send(int sockfd, int id, ...)
     va_start(ap, id);
 
     if (id < BT_MHAVE) {
-        u32 len = prepared[id].len;
+        uint32 len = prepared[id].len;
         PUT_U32BE(buf, len);
         buf[4] = id;
         safe_writen(sockfd, buf, len + 4);
@@ -165,10 +165,10 @@ bt_msg_send(int sockfd, int id, ...)
             safe_writen(sockfd, buf, 4);
             break;
         case BT_MREQUEST: {
-            u32 len = 13;
-            u32 piecei = va_arg(ap, u32);
-            u32 begin = va_arg(ap, u32);
-            u32 length = va_arg(ap, u32);
+            uint32 len = 13;
+            uint32 piecei = va_arg(ap, uint32);
+            uint32 begin = va_arg(ap, uint32);
+            uint32 length = va_arg(ap, uint32);
 
             PUT_U32BE(buf, len);
             buf[4] = id;
@@ -191,9 +191,9 @@ cleanup:
 }
 
 struct bt_msg *
-bt_msg_unpack(const u8 buf[])
+bt_msg_unpack(const uint8 buf[])
 {
-    u32 len, id;
+    uint32 len, id;
     GET_U32BE(buf, len);
     if (!len)
         return &prepared[BT_MKEEP_ALIVE];
@@ -239,9 +239,9 @@ bt_msg_unpack(const u8 buf[])
 struct bt_msg *
 bt_msg_recv(int sockfd)
 {
-    u8 buf[128];
-    u32 len;
-    u8 id;
+    uint8 buf[128];
+    uint32 len;
+    uint8 id;
 
     if (readn(sockfd, &len, 4) != 4)
         return NULL;

@@ -10,7 +10,7 @@
 struct bt_torrent {
     struct bt_settings settings;
 
-    u8 info_hash[SHA1_DIGEST_LEN];
+    uint8 info_hash[SHA1_DIGEST_LEN];
 
     const char *announce[MAX_TRACKERS + 1];
 

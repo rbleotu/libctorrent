@@ -13,8 +13,8 @@ enum {
 };
 
 struct bt_thmsg {
-    u8 id;
-    u32 peer_id;
+    uint8 id;
+    uint32 peer_id;
 };
 
 local const struct bt_thmsg KEEPALIVE = {BT_THMSG_KEEPALIVE, 0};

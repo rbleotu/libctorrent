@@ -42,15 +42,15 @@ struct thread_data {
 
     BT_TQueue tq;
 
-    u8 *mbuf;
+    uint8 *mbuf;
 
     int rd_state;
     size_t rem_rd;
-    u8 *rd_next;
+    uint8 *rd_next;
 
     int wr_state;
     size_t rem_wr;
-    u8 *wr_next;
+    uint8 *wr_next;
 
     int mq_in;
     int (*mq_out)[2];
@@ -157,8 +157,8 @@ control_machine(BT_Torrent t, BT_Peer p, struct bt_msg *m)
         break;
     case BT_MPIECE: {
         struct bt_msg_piece *mpiece = (void *)m;
-        u32 pi = mpiece->piecei;
-        u32 ci = mpiece->begin / CHUNK_SZ;
+        uint32 pi = mpiece->piecei;
+        uint32 ci = mpiece->begin / CHUNK_SZ;
         if (mpiece->len - 9 != CHUNK_SZ) {
             puts("chunk size not matching request size");
         }
@@ -217,17 +217,17 @@ control_machine(BT_Torrent t, BT_Peer p, struct bt_msg *m)
 }
 
 local int
-change_state(u8 **pbuf, int state, size_t *rem)
+change_state(uint8 **pbuf, int state, size_t *rem)
 {
     assert(pbuf && rem);
-    u8 *buf = *pbuf;
+    uint8 *buf = *pbuf;
     switch (state) {
     case ST_MSG_INIT:
         *rem = 4;
         *pbuf = bt_malloc(4);
         return ST_MSG_HEADER;
     case ST_MSG_HEADER: {
-        u32 len;
+        uint32 len;
         GET_U32BE(buf, len);
         if (!len)
             return ST_MSG_INIT;
