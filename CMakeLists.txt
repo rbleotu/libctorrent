@@ -42,3 +42,6 @@ target_sources (tget
 
 target_link_libraries (tget PUBLIC Threads::Threads)
 target_link_libraries (tget PRIVATE ctorrent)
+
+enable_testing ()
+add_subdirectory (test/unit)

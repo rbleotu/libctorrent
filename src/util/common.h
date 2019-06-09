@@ -46,6 +46,9 @@ struct bt_peer_addr {
     uint16 port;
 };
 
+#define CONCAT_HELPER(A,B) A##B
+#define CONCAT(A,B) CONCAT_HELPER(A,B)
+
 #define IN
 #define OUT
 
