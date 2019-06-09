@@ -9,19 +9,20 @@ if (NOT CMAKE_BUILD_TYPE)
     set (CMAKE_BUILD_TYPE Debug)
 endif ()
 
+include_directories (src)
+
 set (CMAKE_THREAD_PREFER_PTHREAD TRUE)
 set (THREADS_PREFER_PTHREAD_FLAG TRUE)
 find_package (Threads REQUIRED)
 
-add_executable (tget)
-target_sources (tget
+add_library (ctorrent)
+target_sources (ctorrent
     PRIVATE
-        src/bcode.c
-        src/bitset.c
-        src/crypt/sha1.c
-        src/disk.c
         src/util/error.c
-        src/main.c
+        src/bcode.c
+        src/crypt/sha1.c
+        src/bitset.c
+        src/disk.c
         src/message.c
         src/thread.c
         src/thread_msg.c
@@ -32,5 +33,12 @@ target_sources (tget
         src/tracker.c
         src/tracker_udp.c
 )
-target_include_directories (tget PRIVATE src)
+
+add_executable (tget)
+target_sources (tget
+    PRIVATE
+        src/main.c
+)
+
 target_link_libraries (tget PUBLIC Threads::Threads)
+target_link_libraries (tget PRIVATE ctorrent)
