@@ -10,6 +10,7 @@ if (NOT CMAKE_BUILD_TYPE)
 endif ()
 
 include_directories (src)
+include_directories (include)
 
 set (CMAKE_THREAD_PREFER_PTHREAD TRUE)
 set (THREADS_PREFER_PTHREAD_FLAG TRUE)
