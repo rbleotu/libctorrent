@@ -32,6 +32,7 @@ target_sources (ctorrent
         src/torrent.c
         src/tracker.c
         src/tracker_udp.c
+        src/net.c
 )
 
 add_executable (tget)
