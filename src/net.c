@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#include <errno.h>
 
 #include "util/common.h"
 #include "util/error.h"
@@ -48,3 +49,42 @@ int net_tcp_disconnect(int sockfd)
     close(sockfd);
 }
 
+ssize_t net_tcp_send(int sockfd, const void *data, size_t sz)
+{
+    size_t total = 0;
+
+    while (sz) {
+        const ssize_t n = send(sockfd, data, sz, 0);
+        if (n <= 0) {
+            if (errno == EINTR)
+                continue;
+            if (errno == EWOULDBLOCK)
+                break;
+            return -1;
+        }
+        sz -= n, data = (byte *)data + n;
+    }
+
+    return total;
+}
+
+ssize_t net_tcp_recv(int sockfd, void *data, size_t sz)
+{
+    size_t total = 0;
+
+    while (sz) {
+        const ssize_t n = recv(sockfd, data, sz, 0);
+        if (n <= 0) {
+            if (errno == EINTR)
+                continue;
+            if (errno == EWOULDBLOCK)
+                break;
+            if (n == 0)
+                break;
+            return -1;
+        }
+        sz -= n, data = (byte *)data + n;
+    }
+
+    return total;
+}
