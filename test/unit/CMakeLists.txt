@@ -11,3 +11,10 @@ add_test (
     NAME test_net
     COMMAND $<TARGET_FILE:test_net>
 )
+
+add_executable (test_peer test_peer.c)
+target_link_libraries (test_peer ctorrent)
+add_test (
+    NAME test_peer
+    COMMAND $<TARGET_FILE:test_peer>
+)

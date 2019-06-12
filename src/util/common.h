@@ -2,6 +2,8 @@
 #define COMMON_H_
 
 #include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
 
 #define bt_malloc malloc
 #define bt_free free
@@ -54,5 +56,8 @@ struct bt_peer_addr {
 #define OUT
 
 #define local static
+
+#define container_of(ptr, type, member) \
+    ((type *)((char *)(ptr) - offsetof(type, member)))
 
 #endif

@@ -35,6 +35,7 @@ target_sources (ctorrent
         src/tracker_udp.c
         src/net.c
         src/eventloop.c
+        src/peer.c
 )
 
 add_executable (tget)
