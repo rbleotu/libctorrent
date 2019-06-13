@@ -63,6 +63,7 @@ ssize_t net_tcp_send(int sockfd, const void *data, size_t sz)
             return -1;
         }
         sz -= n, data = (byte *)data + n;
+        total += n;
     }
 
     return total;
@@ -87,4 +88,17 @@ ssize_t net_tcp_recv(int sockfd, void *data, size_t sz)
     }
 
     return total;
+}
+
+int net_tcp_haserror(int sockfd)
+{
+    int retval = -1;
+    socklen_t len = sizeof(retval);
+
+    if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &retval, &len) < 0) {
+        perror("getsockopt");
+        return -1;
+    }
+
+    return retval;
 }

@@ -5,6 +5,9 @@
 #include "bitset.h"
 #include "pqueue.h"
 #include "eventloop.h"
+#include "message.h"
+
+#define PEER_TXQCAP 128
 
 typedef struct bt_peer *BT_Peer;
 
@@ -12,6 +15,7 @@ struct bt_peer {
     int sockfd;
 
     bool connected;
+    bool handshake_done;
 
     int am_choking;
     int am_interested;
@@ -26,12 +30,24 @@ struct bt_peer {
     BT_EventLoop *eloop;
 
     struct bt_eventproducer evproducer;
+
+    byte rxbuf[17<<10];
+    int rxhave;
+
+    byte txbuf[17<<10];
+    byte *txnext;
+    int txrem;
+
+    struct bt_msg *txqueue[PEER_TXQCAP];
+    int qhead, qtail;
+    int nq;
 };
 
 #define PEER_INIT() ((struct bt_peer) { \
         .evproducer      = {NULL, NULL},\
         .sockfd          = -1,          \
         .connected       = false,       \
+        .handshake_done  = false,       \
         .am_choking      = true,        \
         .am_interested   = false,       \
         .peer_choking    = true,        \
@@ -42,11 +58,14 @@ struct bt_peer {
 
 int bt_peer_init(BT_Peer peer, BT_EventLoop *eloop, size_t npieces);
 int bt_peer_connect(BT_Peer peer, uint32 ipv4, uint16 port);
+int bt_peer_handshake(BT_Peer peer, struct bt_handshake *hshk);
 int bt_peer_disconnect(BT_Peer peer);
 int bt_peer_choke(BT_Peer peer);
 int bt_peer_unchoke(BT_Peer peer);
 int bt_peer_interested(BT_Peer peer);
 int bt_peer_notinterested(BT_Peer peer);
-int bt_peer_requestpiece(BT_Peer peer, size_t pieceid, size_t start, size_t len);
+int bt_peer_requestpiece(BT_Peer peer, uint32 pieceid, uint32 start, uint32 len);
+int bt_peer_sendpiece(BT_Peer, byte data[], uint32 pieceid, uint32 start, uint32 len);
+int bt_peer_recvmsg(BT_Peer peer);
 
 #endif

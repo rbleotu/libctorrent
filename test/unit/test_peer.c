@@ -8,6 +8,7 @@
 #include "util/error.h"
 #include "peer.h"
 #include "net.h"
+#include "../../include/torrent.h"
 
 #define LOCALHOST ((127<<24) | 1)
 #define PORT      8080
@@ -26,6 +27,28 @@ int main(void)
         return EXIT_FAILURE;
     }
 
-    bt_eventloop_run(&eloop);
+    bt_peer_choke(&peer);
+    bool running = true;
+
+    while (running) {
+        struct bt_event ev;
+        int evtype = bt_eventloop_run(&eloop, &ev);
+
+        switch (evtype) {
+        case BT_EVPEER_CONNECT:
+            {
+                byte info_hash[SHA1_DIGEST_LEN] = {0};
+                byte peer_id[20] = "hello world";
+                struct bt_handshake *hsk = bt_handshake(info_hash, peer_id);
+                bt_peer_handshake(ev.a, hsk);
+            }
+            break;
+        case BT_EVPEER_DISCONNECT:
+            puts("disconnected");
+            running = false;
+            break;
+        }
+    }
+
     return 0;
 }

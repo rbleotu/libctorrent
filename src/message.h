@@ -18,7 +18,8 @@ enum {
 
     BT_MKEEP_ALIVE,
 
-    BT_MSG_CNT
+    BT_MSG_CNT,
+    BT_MSG_HANDSHAKE,
 };
 
 local const char *msg_names[] = {
@@ -36,6 +37,8 @@ local const char *msg_names[] = {
 };
 
 #define BT_MSG_LEN 5
+#define bt_msg_len(msg) (((struct bt_msg *)(msg))->len + 4)
+
 struct bt_msg {
     uint32 len;
     int8 id;
@@ -69,7 +72,9 @@ struct bt_msg_piece {
     uint8 block[];
 };
 
-struct bt_msg_handshake {
+struct bt_handshake {
+    uint32 len;
+    uint8 id;
     uint8 pstrlen;
     uint8 pstr[19];
     uint8 reserved[8];
@@ -88,21 +93,27 @@ bt_msg_new(int id, ...);
         memcpy((d).peer_id, (p), sizeof((d).peer_id));      \
     } while (0)
 
-int
-bt_handshake_recv(struct bt_msg_handshake *dest, int sockfd);
-
-int
-bt_handshake_send(const struct bt_msg_handshake *src, int sockfd);
-
-struct bt_msg *
-bt_msg_recv(int sockfd);
-
-int
-bt_msg_send(int sockfd, int id, ...);
-
 void
 bt_msg_free(struct bt_msg *msg);
 
 struct bt_msg *
 bt_msg_unpack(const uint8 buf[]);
+
+void
+bt_msg_pack(byte dest[], struct bt_msg *msg);
+
+void bt_msg_pack(byte buf[], struct bt_msg *);
+
+static inline struct bt_handshake *
+bt_handshake(byte info_hash[SHA1_DIGEST_LEN], byte peer_id[20])
+{
+    struct bt_handshake *hsk = malloc(sizeof(*hsk));
+    if (!hsk) {
+        return NULL;
+    }
+    HSHK_FILL(*hsk, info_hash, peer_id);
+    hsk->len = sizeof(*hsk) - 4;
+    hsk->id = BT_MSG_HANDSHAKE;
+    return hsk;
+}
 #endif

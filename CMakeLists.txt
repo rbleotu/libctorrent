@@ -25,7 +25,6 @@ target_sources (ctorrent
         src/bitset.c
         src/disk.c
         src/message.c
-        src/thread.c
         src/thread_msg.c
         src/timer_queue.c
         src/piece.c

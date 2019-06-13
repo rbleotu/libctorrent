@@ -15,10 +15,10 @@
 #include "message.h"
 
 local struct bt_msg prepared[] = {
-        [BT_MKEEP_ALIVE] = {0, BT_MKEEP_ALIVE},
-        [BT_MCHOKE] = {1, BT_MCHOKE},
-        [BT_MUNCHOKE] = {1, BT_MUNCHOKE},
-        [BT_MINTERESTED] = {1, BT_MINTERESTED},
+        [BT_MKEEP_ALIVE] =     {0, BT_MKEEP_ALIVE},
+        [BT_MCHOKE] =          {1, BT_MCHOKE},
+        [BT_MUNCHOKE] =        {1, BT_MUNCHOKE},
+        [BT_MINTERESTED] =     {1, BT_MINTERESTED},
         [BT_MNOT_INTERESTED] = {1, BT_MNOT_INTERESTED}};
 
 
@@ -31,6 +31,21 @@ bt_msg_new(int id, ...)
     void *res = NULL;
     va_start(ap, id);
     switch (id) {
+    case BT_MREQUEST: {
+        struct bt_msg_request *m = bt_malloc(sizeof(*m));
+        if (!m) {
+            bt_errno = BT_EALLOC;
+            break;
+
+        }
+        m->len = 13;
+        m->id = BT_MREQUEST;
+        m->piecei = va_arg(ap, uint32);
+        m->begin = va_arg(ap, uint32);
+        m->length = va_arg(ap, uint32);
+        res = m;
+      }
+      break;
     case BT_MHAVE: {
         struct bt_msg_have *m = bt_malloc(sizeof(*m));
         if (!m) {
@@ -106,29 +121,29 @@ readn(int fd, void *vptr, size_t n)
 
 #define HSHK_LEN 68
 
-int
-bt_handshake_send(const struct bt_msg_handshake *hshk, int sockfd)
-{
-    char buf[sizeof(*hshk)];
-    memcpy(buf, hshk, 20);
-    memcpy(buf + 20, &hshk->reserved, 8);
-    memcpy(buf + 28, &hshk->info_hash, 20);
-    memcpy(buf + 48, &hshk->peer_id, 20);
-    return writen(sockfd, buf, HSHK_LEN);
-}
-
-int
-bt_handshake_recv(struct bt_msg_handshake *hshk, int sockfd)
-{
-    char buf[sizeof(*hshk)];
-    if (readn(sockfd, buf, HSHK_LEN) < 0)
-        return -1;
-    memcpy(hshk, buf, 20);
-    memcpy(&hshk->reserved, buf + 20, 8);
-    memcpy(&hshk->info_hash, buf + 28, 20);
-    memcpy(&hshk->peer_id, buf + 48, 20);
-    return 0;
-}
+//int
+//bt_handshake_send(const struct bt_msg_handshake *hshk, int sockfd)
+//{
+//    char buf[sizeof(*hshk)];
+//    memcpy(buf, hshk, 20);
+//    memcpy(buf + 20, &hshk->reserved, 8);
+//    memcpy(buf + 28, &hshk->info_hash, 20);
+//    memcpy(buf + 48, &hshk->peer_id, 20);
+//    return writen(sockfd, buf, HSHK_LEN);
+//}
+//
+//int
+//bt_handshake_recv(struct bt_msg_handshake *hshk, int sockfd)
+//{
+//    char buf[sizeof(*hshk)];
+//    if (readn(sockfd, buf, HSHK_LEN) < 0)
+//        return -1;
+//    memcpy(hshk, buf, 20);
+//    memcpy(&hshk->reserved, buf + 20, 8);
+//    memcpy(&hshk->info_hash, buf + 28, 20);
+//    memcpy(&hshk->peer_id, buf + 48, 20);
+//    return 0;
+//}
 
 #define safe_readn(fd, buf, len)                             \
     do {                                                     \
@@ -298,4 +313,36 @@ bt_msg_recv(int sockfd)
 cleanup:
     free(msg);
     return NULL;
+}
+
+void
+bt_msg_pack(byte dest[], struct bt_msg *msg)
+{
+    uint32 i = 0;
+    PUT_U32BE(dest + i, msg->len), i += 4;
+    PUT_U32BE(dest + i, msg->id), i += 1;
+
+    if (msg->id < BT_MHAVE)
+        return;
+
+    switch (msg->id) {
+    case BT_MHAVE:
+        {
+            struct bt_msg_have *have = (void *)msg;
+            PUT_U32BE(dest + i, have->piecei), i += 4;
+            break;
+        }
+    case BT_MSG_HANDSHAKE:
+        {
+            struct bt_handshake *hsk = (void *)msg;
+            dest[i++] = hsk->pstrlen;
+            memcpy(dest+i, hsk->pstr, sizeof(hsk->pstr)), i += sizeof(hsk->pstr);
+            memset(dest+i, 0, sizeof(hsk->reserved)), i+= sizeof(hsk->reserved);
+            memcpy(dest+i, hsk->info_hash, SHA1_DIGEST_LEN), i += SHA1_DIGEST_LEN;
+            memcpy(dest+i, hsk->peer_id, 20), i += 20;
+            break;
+        }
+    default:
+        assert (!"not implmented");
+    }
 }

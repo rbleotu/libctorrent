@@ -393,7 +393,7 @@ bt_torrent_start(BT_Torrent t)
         bt_errno = BT_ENOPEERS;
         return -1;
     }
-    bt_net_start(t);
+    //bt_net_start(t);
     return 0;
 }
 

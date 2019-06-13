@@ -7,3 +7,4 @@ int net_tcp_connect(uint32 ipv4, uint16 port);
 ssize_t net_tcp_send(int sockfd, const void *data, size_t sz);
 ssize_t net_tcp_recv(int sockfd, void *data, size_t sz);
 int net_tcp_disconnect(int sockfd);
+int net_tcp_haserror(int sockfd);

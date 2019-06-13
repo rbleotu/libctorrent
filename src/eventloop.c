@@ -12,6 +12,7 @@
 
 #include "util/common.h"
 #include "util/error.h"
+#include "event.h"
 #include "eventloop.h"
 
 #define MAX_EVENTS 16
@@ -58,7 +59,7 @@ bt_eventloop_register(BT_EventLoop *loop, int fd, BT_EventProducer *prod)
 }
 
 int
-bt_eventloop_run(BT_EventLoop *loop)
+bt_eventloop_run(BT_EventLoop *loop, struct bt_event *out)
 {
     int n;
     struct epoll_event events[MAX_EVENTS];
@@ -74,14 +75,18 @@ bt_eventloop_run(BT_EventLoop *loop)
             BT_EventProducer *prod = events[n].data.ptr;
             assert (prod != NULL);
 
+            if (events[n].events & (EPOLLERR | EPOLLHUP)) {
+                return prod->on_destroy(prod);
+            }
+
             if (events[n].events & EPOLLIN) {
-                const int event = prod->on_read(prod);
+                const int event = prod->on_read(prod, out);
                 if (event)
                     return event;
             }
 
             if (events[n].events & EPOLLOUT) {
-                const int event = prod->on_write(prod);
+                const int event = prod->on_write(prod, out);
                 if (event)
                     return event;
             }
