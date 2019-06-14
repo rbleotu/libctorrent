@@ -21,38 +21,41 @@ next_cap(size_t cap)
     return cap ? (cap * 1.5) : 8;
 }
 
+#define vector_remove(v,i) \
+    memmove(&(v)->data[(i)], &(v)->data[(i)+1], sizeof((v)->data[0]) * (--(v)->n - (i)))
+
 #define vector_resizex(N)   CONCAT(CONCAT(vector_, N), _resize)
 #define vector_pushbackx(N) CONCAT(CONCAT(vector_, N), _pushback)
 
-#define VECTOR_DEFINE(T, N)                                           \
-    typedef struct CONCAT(vector_,N) Vector##N;                       \
-                                                                      \
-    struct CONCAT(vector_,N) {                                        \
-        size_t cap, n;                                                \
-        T *data;                                                      \
-    };                                                                \
-                                                                      \
-                                                                      \
-    static int                                                        \
-    vector_resizex(N)(Vector(N) *v, size_t newcap)                    \
-    {                                                                 \
-        void * const tmp = realloc(v->data, sizeof(v->data) * newcap);\
-        if (!tmp)                                                     \
-            return -1;                                                \
-        v->data = tmp, v->cap = newcap;                               \
-        return 0;                                                     \
-    }                                                                 \
-                                                                      \
-                                                                      \
-    static inline int                                                 \
-    vector_pushbackx(N)(Vector##N *v, T x)                            \
-    {                                                                 \
-        if (v->n >= v->cap) {                                         \
-            if (vector_resizex(N)(v, next_cap(v->cap)))               \
-                return -1;                                            \
-        }                                                             \
-        v->data[v->n++] = x;                                          \
-        return 0;                                                     \
+#define VECTOR_DEFINE(T, N)                                              \
+    typedef struct CONCAT(vector_,N) Vector##N;                          \
+                                                                         \
+    struct CONCAT(vector_,N) {                                           \
+        size_t cap, n;                                                   \
+        T *data;                                                         \
+    };                                                                   \
+                                                                         \
+                                                                         \
+    static int                                                           \
+    vector_resizex(N)(Vector(N) *v, size_t newcap)                       \
+    {                                                                    \
+        void * const tmp = realloc(v->data, sizeof(v->data[0]) * newcap);\
+        if (!tmp)                                                        \
+            return -1;                                                   \
+        v->data = tmp, v->cap = newcap;                                  \
+        return 0;                                                        \
+    }                                                                    \
+                                                                         \
+                                                                         \
+    static inline int                                                    \
+    vector_pushbackx(N)(Vector##N *v, T x)                               \
+    {                                                                    \
+        if (v->n >= v->cap) {                                            \
+            if (vector_resizex(N)(v, next_cap(v->cap)))                  \
+                return -1;                                               \
+        }                                                                \
+        v->data[v->n++] = x;                                             \
+        return 0;                                                        \
     }
 
 static inline int

@@ -6,6 +6,7 @@
 #include "pqueue.h"
 #include "eventloop.h"
 #include "message.h"
+#include "../include/torrent.h"
 
 #define PEER_TXQCAP 128
 
@@ -13,6 +14,9 @@ typedef struct bt_peer *BT_Peer;
 
 struct bt_peer {
     int sockfd;
+
+    uint32 ipv4;
+    uint32 port;
 
     bool connected;
     bool handshake_done;
@@ -48,6 +52,8 @@ struct bt_peer {
         .sockfd          = -1,          \
         .connected       = false,       \
         .handshake_done  = false,       \
+        .ipv4            = 0,           \
+        .port            = 0,           \
         .am_choking      = true,        \
         .am_interested   = false,       \
         .peer_choking    = true,        \
@@ -57,6 +63,7 @@ struct bt_peer {
     })
 
 int bt_peer_init(BT_Peer peer, BT_EventLoop *eloop, size_t npieces);
+BT_Peer bt_peer_fromsock(BT_EventLoop *eloop, int sockfd, size_t npieces);
 int bt_peer_connect(BT_Peer peer, uint32 ipv4, uint16 port);
 int bt_peer_handshake(BT_Peer peer, struct bt_handshake *hshk);
 int bt_peer_disconnect(BT_Peer peer);
@@ -67,5 +74,6 @@ int bt_peer_notinterested(BT_Peer peer);
 int bt_peer_requestpiece(BT_Peer peer, uint32 pieceid, uint32 start, uint32 len);
 int bt_peer_sendpiece(BT_Peer, byte data[], uint32 pieceid, uint32 start, uint32 len);
 int bt_peer_recvmsg(BT_Peer peer);
+int bt_peer_handlemessage(BT_Torrent t, BT_Peer peer, int msgtype, void *data);
 
 #endif

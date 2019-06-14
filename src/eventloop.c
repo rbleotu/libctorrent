@@ -59,47 +59,73 @@ bt_eventloop_register(BT_EventLoop *loop, int fd, BT_EventProducer *prod)
 }
 
 int
-bt_eventloop_run(BT_EventLoop *loop, struct bt_event *out)
+bt_eventloop_run(BT_EventQueue *queue, BT_EventLoop *loop)
 {
-    int n;
     struct epoll_event events[MAX_EVENTS];
+    struct bt_event ev;
+    int pushed = 0;
+    int ret;
 
-    for (;;) {
+    while (!pushed) {
         const int nfds = epoll_wait(loop->epollfd, events, MAX_EVENTS, -1);
         if (nfds == -1) {
             perror("epoll_wait");
             return -1;
         }
 
-        for (n = 0; n < nfds; ++n) {
+        for (int n = 0; n < nfds; ++n) {
             BT_EventProducer *prod = events[n].data.ptr;
             assert (prod != NULL);
 
-            if (events[n].events & (EPOLLERR | EPOLLHUP)) {
-                return prod->on_destroy(prod);
+            if (events[n].events & EPOLLERR) {
+                if (prod->on_destroy) {
+                    ret = prod->on_destroy(prod, queue);
+                    if (ret < 0) {
+                        perror("error ocurred");
+                    }
+                    pushed += ret;
+                }
             }
 
             if (events[n].events & EPOLLIN) {
-                const int event = prod->on_read(prod, out);
-                if (event)
-                    return event;
+                if ((ret = prod->on_read(prod, queue)) < 0) {
+                    perror("read()");
+                }
+                pushed += ret;
             }
 
             if (events[n].events & EPOLLOUT) {
-                const int event = prod->on_write(prod, out);
-                if (event)
-                    return event;
+                if ((ret = prod->on_write(prod, queue)) < 0) {
+                    perror("write()");
+                }
+                pushed += ret;
             }
-
         }
     }
 
-    assert (!"unreachable code");
-    return 0;
+    return pushed;
 }
 
 int bt_eventloop_destroy(BT_EventLoop *loop)
 {
     assert (!"not implemented");
     return 0;
+}
+
+bool bt_eventloop_unregister(BT_EventLoop *loop, int fd, BT_EventProducer *producer)
+{
+    size_t i = 0;
+
+    VECTOR_FOREACH (&loop->emitters, e, BT_EventProducer *) {
+        if (*e == producer) {
+            goto remove;
+        }
+        i  = i + 1;
+    }
+
+    return false;
+remove:
+    epoll_ctl(loop->epollfd, EPOLL_CTL_DEL, fd, NULL);
+    vector_remove(&loop->emitters, i);
+    return true;
 }

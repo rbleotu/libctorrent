@@ -10,6 +10,7 @@
 #include "message.h"
 #include "net.h"
 #include "../include/torrent.h"
+#include "torrentx.h"
 
 local void
 queue_push(BT_Peer peer, struct bt_msg *msg)
@@ -44,10 +45,10 @@ has_message(const byte src[], size_t sz)
     return true;
 }
 
-local int
+local inline int
 has_handshake(const byte src[], size_t len)
 {
-    return false;
+    return len >= HSHK_LEN;
 }
 
 local int
@@ -70,7 +71,19 @@ msg2event(int id)
         return BT_EVPEER_HAVE;
     case BT_MBITFIELD:
         return BT_EVPEER_BITFIELD;
+    case BT_MKEEP_ALIVE:
+        return BT_EVPEER_KEEPALIVE;
+    case BT_MPORT:
+        return 0;
+    case BT_MCANCEL:
+        return 0;
+    case BT_MSG_HANDSHAKE:
+        return BT_EVPEER_HANDSHAKE;
+    default:
+        printf("%d\n", id);
+        assert (!"not handled");
     }
+    return 0;
 }
 
 local void
@@ -82,7 +95,7 @@ fill_event(struct bt_event *out, BT_Peer peer, struct bt_msg *msg)
 }
 
 local int
-on_read(BT_EventProducer *prod, struct bt_event *out)
+on_read(BT_EventProducer *prod, BT_EventQueue *queue)
 {
     BT_Peer this = container_of(prod, struct bt_peer, evproducer);
     assert (this != NULL);
@@ -90,62 +103,93 @@ on_read(BT_EventProducer *prod, struct bt_event *out)
     if (!this->connected)
         return 0;
 
-    ssize_t n;
-
-    do {
-        n = net_tcp_recv(this->sockfd, this->rxbuf + this->rxhave, sizeof(this->rxbuf) - this->rxhave);
+    if (!this->handshake_done) {
+        assert (this->rxhave < HSHK_LEN);
+        ssize_t n = net_tcp_recv(this->sockfd, this->rxbuf + this->rxhave, HSHK_LEN - this->rxhave);
         if (n < 0) {
             perror("recv()");
             return -1;
         }
 
+        if (n == 0) {
+            bt_eventqueue_push(queue, BT_EVENT(BT_EVPEER_DISCONNECT, this, NULL));
+            return 1;
+        }
+
         this->rxhave += n;
+
+        if (has_handshake(this->rxbuf, this->rxhave)) {
+            struct bt_handshake *hshk = bt_handshake_unpack(this->rxbuf);
+            memmove(this->rxbuf, this->rxbuf + HSHK_LEN, HSHK_LEN);
+            this->rxhave -= HSHK_LEN;
+
+            bt_eventqueue_push(queue, BT_EVENT(BT_EVPEER_HANDSHAKE, this, hshk));
+            return 1;
+        }
+
+        return 0;
+    }
+
+    ssize_t n = net_tcp_recv(this->sockfd, this->rxbuf + this->rxhave, sizeof(this->rxbuf) - this->rxhave);
+    if (n < 0) {
+        perror("recv()");
+        return -1;
+    }
+
+    if (n == 0) {
+        bt_eventqueue_push(queue, BT_EVENT(BT_EVPEER_DISCONNECT, this, NULL));
+        return 1;
+    }
+
+    bool pushed = false;
+
+    do {
+        this->rxhave += n;
+        pushed = false;
 
         if (this->handshake_done) {
             if (has_message(this->rxbuf, this->rxhave)) {
                 struct bt_msg *msg = bt_msg_unpack(this->rxbuf);
                 memmove(this->rxbuf, this->rxbuf + bt_msg_len(msg), bt_msg_len(msg));
                 this->rxhave -= bt_msg_len(msg);
-                fill_event(out, this, msg);
-                return msg->id;
-            }
-        } else {
-            if (has_handshake(this->rxbuf, this->rxhave)) {
-                //
 
-
+                bt_eventqueue_push(queue, BT_EVENT(msg2event(msg->id), this, msg));
+                pushed =  true;
             }
         }
-    } while (n);
+
+        n = net_tcp_recv(this->sockfd, this->rxbuf + this->rxhave, sizeof(this->rxbuf) - this->rxhave);
+        if (n < 0) {
+            perror("recv()");
+            return -1;
+        }
+    } while (n || pushed);
 
     return 0;
 }
 
 local int
-on_destroy(BT_EventProducer *prod)
+on_destroy(BT_EventProducer *prod, BT_EventQueue *queue)
 {
-    BT_Peer this = container_of(prod, struct bt_peer, evproducer);
-    this->connected = false;
-    if (this->sockfd != -1) {
-        net_tcp_disconnect(this->sockfd);
-        this->sockfd = -1;
-    }
-    return BT_EVPEER_DISCONNECT;
+    const BT_Peer this = container_of(prod, struct bt_peer, evproducer);
+    bt_eventqueue_push(queue, BT_EVENT(BT_EVPEER_DISCONNECT, this, NULL));
+    return 0;
 }
 
 local int
-on_write(BT_EventProducer *prod, struct bt_event *out)
+on_write(BT_EventProducer *prod, BT_EventQueue *queue)
 {
     BT_Peer this = container_of(prod, struct bt_peer, evproducer);
     size_t n;
 
     if (!this->connected) {
         if (net_tcp_haserror(this->sockfd)) {
+            perror("net_tcp_haserror");
             return -1;
         }
-        this->connected = true;
-        out->a = this;
-        return out->type = BT_EVPEER_CONNECT;
+
+        bt_eventqueue_push(queue, BT_EVENT(BT_EVPEER_CONNECT, this, NULL));
+        return 1;
     }
 
     do {
@@ -206,6 +250,8 @@ int bt_peer_connect(BT_Peer peer, uint32 ipv4, uint16 port)
         .on_read = on_read,
         .on_destroy = on_destroy,
     };
+    peer->ipv4 = ipv4;
+    peer->port = port;
 
     bt_eventloop_register(peer->eloop, sockfd, &peer->evproducer);
     return 0;
@@ -276,6 +322,16 @@ int bt_peer_notinterested(BT_Peer peer)
 
 int bt_peer_disconnect(BT_Peer peer)
 {
+    if (peer->eloop) {
+        bt_eventloop_unregister(peer->eloop, peer->sockfd, &peer->evproducer);
+        peer->eloop = NULL;
+    }
+
+    if (peer->sockfd != -1) {
+        net_tcp_disconnect(peer->sockfd);
+        peer->sockfd = -1;
+    }
+
     return 0;
 }
 
@@ -305,5 +361,106 @@ int bt_peer_recvmsg(BT_Peer peer)
 int bt_peer_handshake(BT_Peer peer, struct bt_handshake *hshk)
 {
     queue_push(peer, (void *)hshk);
+    return 0;
+}
+
+BT_Peer bt_peer_fromsock(BT_EventLoop *eloop, int sockfd, size_t npieces)
+{
+    BT_Peer peer = malloc(sizeof(*peer));
+    if (!peer) {
+        perror("malloc");
+        return NULL;
+    }
+    *peer = PEER_INIT();
+
+    peer->eloop = eloop;
+    peer->sockfd = sockfd;
+    peer->pieces = bt_bitset_new(npieces);
+    if (!peer->pieces) {
+        perror("malloc");
+        bt_errno = BT_EALLOC;
+        free(peer);
+        return NULL;
+    }
+
+    peer->evproducer = (BT_EventProducer) {
+        .on_write = on_write,
+        .on_read = on_read,
+        .on_destroy = on_destroy,
+    };
+
+    bt_eventloop_register(eloop, sockfd, &peer->evproducer);
+    return peer;
+}
+
+local bool
+valid_handshake(BT_Torrent t)
+{
+    return true;
+}
+
+int
+bt_peer_handlemessage(BT_Torrent t, BT_Peer peer, int msg, void *data)
+{
+    assert (t != NULL);
+    assert (peer != NULL);
+
+    byte ip[4];
+    PUT_U32BE(ip, peer->ipv4);
+    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] ", ip[0], ip[1], ip[2], ip[3]);
+
+    switch (msg) {
+    case  BT_EVPEER_CONNECT:
+        peer->connected = true;
+        puts("connected");
+        {
+            byte peer_id[20] = "hello world";
+            struct bt_handshake *hshk = bt_handshake(t->info_hash, peer_id);
+            bt_peer_handshake(peer, hshk);
+            puts("sent handshake");
+        }
+        break;
+    case BT_EVPEER_HANDSHAKE:
+        puts("received handshake ...");
+        {
+            struct bt_handshake *hshk = data;
+            if (!valid_handshake(t)) {
+                bt_peer_disconnect(peer);
+            } else {
+                peer->handshake_done = true;
+                puts("... handshake OK!");
+            }
+            free(hshk);
+        }
+        break;
+    case BT_EVPEER_DISCONNECT:
+        bt_peer_disconnect(peer);
+        puts("disconnected");
+        break;
+    case BT_EVPEER_HAVE:
+        puts("got have msg");
+        break;
+    case BT_EVPEER_PIECE:
+        puts("got piece msg");
+        break;
+    case BT_EVPEER_INTERESTED:
+        peer->peer_interested = true;
+        puts("interested");
+        break;
+    case BT_EVPEER_NOTINTERESTED:
+        peer->peer_interested = false;
+        puts("not interested");
+        break;
+    case BT_EVPEER_UNCHOKE:
+        peer->peer_choking = false;
+        break;
+    case BT_EVPEER_KEEPALIVE:
+        puts("keepalive");
+        break;
+    default:
+        putc('\n', stdout);
+        break;
+    }
+
     return 0;
 }

@@ -14,28 +14,6 @@ enum {
     BT_STATUS_CNT
 };
 
-enum {
-    BT_EVNONE,
-
-    BT_EVPEER_CONNECT,
-    BT_EVPEER_HANDSHAKE,
-    BT_EVPEER_REQUEST,
-    BT_EVPEER_PIECE,
-    BT_EVPEER_CHOKE,
-    BT_EVPEER_UNCHOKE,
-    BT_EVPEER_INTERESTED,
-    BT_EVPEER_NOTINTERESTED,
-    BT_EVPEER_HAVE,
-    BT_EVPEER_BITFIELD,
-    BT_EVPEER_DISCONNECT,
-};
-
-enum {
-    BT_EVENT_NONE,
-    BT_EVENT_GOTPIECE,
-
-    BT_EVENT_CNT
-};
 
 struct bt_settings {
     BT_Logger logger;

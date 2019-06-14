@@ -75,20 +75,19 @@ struct bt_msg_piece {
 struct bt_handshake {
     uint32 len;
     uint8 id;
-    uint8 pstrlen;
-    uint8 pstr[19];
-    uint8 reserved[8];
-    uint8 info_hash[SHA1_DIGEST_LEN];
-    uint8 peer_id[20];
-};
+    byte magic[20];
+    byte reserved[8];
+    byte info_hash[SHA1_DIGEST_LEN];
+    byte peer_id[20];
+} __attribute__((packed));
 
 struct bt_msg *
 bt_msg_new(int id, ...);
 
+#define HSHK_LEN 68
 #define HSHK_FILL(d, ih, p)                                 \
     do {                                                    \
-        (d).pstrlen = 19;                                   \
-        memcpy((d).pstr, "BitTorrent protocol", 19);        \
+        memcpy((d).magic, "\x13""BitTorrent protocol", 20); \
         memcpy((d).info_hash, (ih), sizeof((d).info_hash)); \
         memcpy((d).peer_id, (p), sizeof((d).peer_id));      \
     } while (0)
@@ -111,9 +110,13 @@ bt_handshake(byte info_hash[SHA1_DIGEST_LEN], byte peer_id[20])
     if (!hsk) {
         return NULL;
     }
+    memset(hsk, 0, sizeof(*hsk));
     HSHK_FILL(*hsk, info_hash, peer_id);
-    hsk->len = sizeof(*hsk) - 4;
+    hsk->len = sizeof(*hsk) - 9;
     hsk->id = BT_MSG_HANDSHAKE;
     return hsk;
 }
+
+struct bt_handshake *bt_handshake_unpack(const byte src[]);
+
 #endif

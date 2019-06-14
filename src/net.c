@@ -18,6 +18,16 @@
 #include "message.h"
 #include "net.h"
 
+int net_tcp_reuseaddr(int sockfd)
+{
+    int value = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(int)) < 0) {
+        perror("setsockopt()");
+        return -1;
+    }
+    return 0;
+}
+
 local int nonblock(int fd)
 {
     int flags = fcntl(fd, F_GETFL, 0);
@@ -85,6 +95,7 @@ ssize_t net_tcp_recv(int sockfd, void *data, size_t sz)
             return -1;
         }
         sz -= n, data = (byte *)data + n;
+        total += n;
     }
 
     return total;
@@ -102,3 +113,39 @@ int net_tcp_haserror(int sockfd)
 
     return retval;
 }
+
+int net_tcp_ipv4listen(uint16 port)
+{
+    const int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd < 0) {
+        return -1;
+    }
+
+    const struct sockaddr_in addr = {
+        .sin_family = AF_INET,
+        .sin_port = htons(port),
+        .sin_addr = {INADDR_ANY},
+    };
+
+    net_tcp_reuseaddr(sockfd);
+
+    const int ec = bind(sockfd, (void *)&addr, sizeof(addr));
+    if (ec < 0) {
+        close(sockfd);
+        return -1;
+    }
+
+    if (listen(sockfd, 16) < 0) {
+        close(sockfd);
+        return -1;
+    }
+
+    nonblock(sockfd);
+    return sockfd;
+}
+
+int net_tcp_accept(int sockfd)
+{
+    return accept(sockfd, NULL, 0);
+}
+

@@ -119,8 +119,6 @@ readn(int fd, void *vptr, size_t n)
     return (n - nleft); /* return >= 0 */
 }
 
-#define HSHK_LEN 68
-
 //int
 //bt_handshake_send(const struct bt_msg_handshake *hshk, int sockfd)
 //{
@@ -225,6 +223,8 @@ bt_msg_unpack(const uint8 buf[])
     msg->len = len;
     msg->id = id;
 
+    assert (len < (17<<10));
+
     switch (id) {
     case BT_MHAVE: {
         struct bt_msg_have *have = (void *)msg;
@@ -315,12 +315,35 @@ cleanup:
     return NULL;
 }
 
+struct bt_handshake *
+bt_handshake_unpack(const byte src[])
+{
+    struct bt_handshake *hsk = malloc(sizeof(*hsk));
+    if (!hsk) {
+        perror("malloc");
+        return NULL;
+
+    }
+    size_t i = 0;
+    hsk->id = BT_MSG_HANDSHAKE;
+    hsk->len = HSHK_LEN - 4;
+
+    memcpy(hsk->magic, src+i, sizeof(hsk->magic)), i += sizeof(hsk->magic);
+    memcpy(hsk->reserved, src+i, sizeof(hsk->reserved)), i+= sizeof(hsk->reserved);
+    memcpy(hsk->info_hash, src+i, SHA1_DIGEST_LEN), i += SHA1_DIGEST_LEN;
+    memcpy(hsk->peer_id, src+i, 20), i += 20;
+
+    return hsk;
+}
+
 void
 bt_msg_pack(byte dest[], struct bt_msg *msg)
 {
     uint32 i = 0;
-    PUT_U32BE(dest + i, msg->len), i += 4;
-    PUT_U32BE(dest + i, msg->id), i += 1;
+    if (msg->id < BT_MSG_CNT) {
+        PUT_U32BE(dest + i, msg->len), i += 4;
+        PUT_U32BE(dest + i, msg->id), i += 1;
+    }
 
     if (msg->id < BT_MHAVE)
         return;
@@ -335,8 +358,7 @@ bt_msg_pack(byte dest[], struct bt_msg *msg)
     case BT_MSG_HANDSHAKE:
         {
             struct bt_handshake *hsk = (void *)msg;
-            dest[i++] = hsk->pstrlen;
-            memcpy(dest+i, hsk->pstr, sizeof(hsk->pstr)), i += sizeof(hsk->pstr);
+            memcpy(dest+i, hsk->magic, sizeof(hsk->magic)), i += sizeof(hsk->magic);
             memset(dest+i, 0, sizeof(hsk->reserved)), i+= sizeof(hsk->reserved);
             memcpy(dest+i, hsk->info_hash, SHA1_DIGEST_LEN), i += SHA1_DIGEST_LEN;
             memcpy(dest+i, hsk->peer_id, 20), i += 20;

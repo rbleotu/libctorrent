@@ -16,6 +16,8 @@
 #include "piece.h"
 #include "thread.h"
 #include "torrentx.h"
+#include "util/vector.h"
+#include "peer.h"
 
 local inline unsigned
 hex_value(char h)
@@ -209,7 +211,7 @@ compute_hash(uint8_t hash[], BT_BCode b)
     return 0;
 }
 
-local int
+local BT_Torrent
 from_metainfo_file(BT_Torrent t, const char *path)
 {
     BT_BCode meta, info, files;
@@ -222,7 +224,7 @@ from_metainfo_file(BT_Torrent t, const char *path)
     FILE *f = fopen(path, "rb");
     if (!f) {
         bt_errno = BT_EOPEN;
-        return -1;
+        return NULL;
     }
 
     if (bt_bdecode_file(&meta, f) < 0)
@@ -248,7 +250,7 @@ from_metainfo_file(BT_Torrent t, const char *path)
 
     t->piece_length = b_num(piece_length);
 
-    t->mgr = bt_disk_new(30);
+    t->mgr = bt_disk_new(64);
     if (!t->mgr)
         goto error;
 
@@ -256,8 +258,7 @@ from_metainfo_file(BT_Torrent t, const char *path)
         t->size = 0;
         BT_BCode file, path;
         char *path_str;
-        for (size_t i = 0; !b_isnil(file = bt_bcode_get(files, i));
-             i++) {
+        for (size_t i = 0; !b_isnil(file = bt_bcode_get(files, i)); i++) {
             format_check(b_isdict(file));
 
             path = bt_bcode_get(file, "path");
@@ -268,8 +269,6 @@ from_metainfo_file(BT_Torrent t, const char *path)
 
             sz = b_num(bt_bcode_get(file, "length"));
             t->size += sz;
-
-            log_info(t, "file: %30s size: %8u", path, sz);
 
             if (bt_disk_add_file(t->mgr, path_str, sz) < 0)
                 goto error;
@@ -305,12 +304,12 @@ from_metainfo_file(BT_Torrent t, const char *path)
         goto error;
 
     fclose(f);
-    return 0;
+    return t;
 alloc_error:
 format_error:
 error:
     fclose(f);
-    return -1;
+    return NULL;
 }
 
 extern BT_Torrent
@@ -327,7 +326,7 @@ bt_torrent_new(BT_Settings settings)
 
     if (settings->metainfo_path) {
         log_info(t, "reading metainfo from file '%s'", settings->metainfo_path);
-        if (from_metainfo_file(t, settings->metainfo_path))
+        if (!(t = from_metainfo_file(t, settings->metainfo_path)))
             goto error;
     } else {
         assert (!"TODO: magnet links");
@@ -385,6 +384,8 @@ bt_torrent_add_action(BT_Torrent t, int ev, void *h)
 {
 }
 
+VECTOR_DEFINE(struct bt_peer, Peer);
+
 extern int
 bt_torrent_start(BT_Torrent t)
 {
@@ -393,7 +394,41 @@ bt_torrent_start(BT_Torrent t)
         bt_errno = BT_ENOPEERS;
         return -1;
     }
-    //bt_net_start(t);
+
+    struct bt_eventloop eloop;
+    bt_eventloop_init(&eloop);
+
+    Vector(Peer) vp = VECTOR();
+    if (vector_resizex(Peer)(&vp, t->naddr)) {
+        bt_errno = BT_EALLOC;
+        return -1;
+    }
+
+    vp.n = t->naddr;
+
+    for (size_t i=0; i<t->naddr; i++) {
+        bt_peer_init(&vp.data[i], &eloop, t->npieces);
+        bt_peer_connect(&vp.data[i], t->addrtab[i].ipv4, t->addrtab[i].port);
+    }
+
+    struct bt_event ev;
+    bool running = true;
+
+    BT_EventQueue queue;
+    bt_eventqueue_init(&queue);
+
+    while (running) {
+        bt_eventloop_run(&queue, &eloop);
+
+        while (!bt_eventqueue_isempty(&queue)) {
+            ev = EVENT_INIT();
+            bt_eventqueue_pop(&queue, &ev);
+            if (ev.a) {
+                bt_peer_handlemessage(t, ev.a, ev.type, ev.b);
+            }
+        }
+    }
+
     return 0;
 }
 

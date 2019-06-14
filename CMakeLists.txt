@@ -35,6 +35,7 @@ target_sources (ctorrent
         src/net.c
         src/eventloop.c
         src/peer.c
+        src/peerserver.c
 )
 
 add_executable (tget)
