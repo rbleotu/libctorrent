@@ -7,6 +7,7 @@
 #include "torrent.h"
 #include "util/common.h"
 #include "peer.h"
+#include "eventqueue.h"
 
 #define MAX_UNCHOKED 10
 #define UNCHOKE_DT   20
@@ -30,6 +31,11 @@ struct bt_torrent {
     size_t piece_length;
     unsigned npieces, nhave;
 
+    BT_Piece want[16];
+    int nwant;
+
+    struct bt_eventqueue evqueue;
+
     struct bt_piece piecetab[];
 };
 
@@ -48,6 +54,12 @@ static inline bool
 bt_torrent_has_piece(BT_Torrent t, uint32 i)
 {
     return bt_piece_complete(&t->piecetab[i]);
+}
+
+static inline void
+bt_torrent_piece_completed(BT_Torrent t, BT_Piece piece)
+{
+    bt_eventqueue_push(&t->evqueue, BT_EVENT(BT_EVPIECE_COMPLETE, piece, NULL));
 }
 
 #endif

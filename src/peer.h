@@ -6,6 +6,7 @@
 #include "pqueue.h"
 #include "eventloop.h"
 #include "message.h"
+#include "piece.h"
 #include "../include/torrent.h"
 
 #define PEER_TXQCAP 128
@@ -26,6 +27,9 @@ struct bt_peer {
 
     int peer_choking;
     int peer_interested;
+
+    uint64 uploaded;
+    uint64 downloaded;
 
     BT_PQueue requestq;
 
@@ -54,6 +58,8 @@ struct bt_peer {
         .handshake_done  = false,       \
         .ipv4            = 0,           \
         .port            = 0,           \
+        .uploaded        = 0,           \
+        .downloaded      = 0,           \
         .am_choking      = true,        \
         .am_interested   = false,       \
         .peer_choking    = true,        \
@@ -71,11 +77,15 @@ int bt_peer_choke(BT_Peer peer);
 int bt_peer_unchoke(BT_Peer peer);
 int bt_peer_interested(BT_Peer peer);
 int bt_peer_notinterested(BT_Peer peer);
+int bt_peer_have(BT_Peer peer, uint32 piece);
 int bt_peer_requestpiece(BT_Peer peer, uint32 pieceid, uint32 start, uint32 len);
 int bt_peer_sendpiece(BT_Peer, byte data[], uint32 pieceid, uint32 start, uint32 len);
 int bt_peer_recvmsg(BT_Peer peer);
 int bt_peer_handlemessage(BT_Torrent t, BT_Peer peer, int msgtype, void *data);
 double bt_peer_progress(BT_Torrent t, BT_Peer peer);
 bool bt_peer_haspiece(BT_Peer peer, uint32 piecei);
+uint32 bt_peer_ulrate(BT_Peer peer);
+uint32 bt_peer_dlrate(BT_Peer peer);
+int bt_peer_requestpiecefull(BT_Peer peer, BT_Piece piece, uint32 id);
 
 #endif

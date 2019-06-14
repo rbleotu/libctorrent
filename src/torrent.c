@@ -414,9 +414,32 @@ bt_markinterest(BT_Torrent t, Vector(Peer) *v)
 local void
 bt_chokealgo(BT_Torrent t, Vector(Peer) *v)
 {
+    const size_t n = ARR_LEN(t->unchoked);
+
     VECTOR_FOREACH(v, peer, struct bt_peer) {
         if (!peer->handshake_done)
             continue;
+
+        size_t i = 0;
+        BT_Peer j = peer;
+
+        for (; i<n; i++) {
+            if (bt_peer_ulrate(j) >= bt_peer_ulrate(t->unchoked[i])) {
+                BT_Peer tmp = t->unchoked[i];
+                t->unchoked[i] = j;
+                j = tmp;
+            }
+        }
+
+        if (i == n) {
+            if (j)
+                bt_peer_choke(peer);
+        }
+    }
+
+    for (size_t i=0; i<n; i++) {
+        if (t->unchoked[i])
+            bt_peer_unchoke(t->unchoked[i]);
     }
 
     t->last_chokealgo = time(NULL);
@@ -426,7 +449,83 @@ local bool
 should_run_chokealgo(BT_Torrent t)
 {
     time_t now = time(NULL);
-    return t->last_chokealgo - now > UNCHOKE_DT;
+    return now - t->last_chokealgo > 1;
+}
+
+local bool
+should_run_piecealgo(BT_Torrent t)
+{
+    return t->nwant == 0;
+}
+
+local int
+bt_piecealgo(BT_Torrent t, BT_Piece v[], int n)
+{
+    int total = 0;
+
+    for (size_t i=0; i<t->npieces; i++) {
+        BT_Piece piece = bt_torrent_get_piece(t, i);
+
+        double score = bt_piece_calcscore(piece);
+        if (score == 0.)
+            continue;
+
+        int j = 0;
+
+        for (;j < total; j++) {
+            double b = bt_piece_calcscore(t->want[j]);
+
+            if (score > b) {
+                BT_Piece tmp = t->want[j];
+                t->want[j] = piece;
+                piece = tmp;
+                score = b;
+            }
+        }
+
+        if (total < n) {
+            t->want[j] = piece;
+            total++;
+        }
+    }
+
+    return total;
+}
+
+local int
+bt_piece_request(BT_Torrent t, BT_Piece want[], size_t n, Vector(Peer) *v)
+{
+    VECTOR_FOREACH(v, peer, struct bt_peer) {
+        if (!peer->handshake_done)
+            continue;
+        if (peer->peer_choking)
+            continue;
+
+        for (size_t i=0; i<n; i++) {
+            BT_Piece piece = want[i];
+            size_t id = piece - t->piecetab;
+
+            if (bt_peer_haspiece(peer, id)) {
+                bt_peer_requestpiecefull(peer, piece, id);
+                want[i] = want[n-1];
+                return n - 1;
+            }
+        }
+    }
+
+    return n;
+}
+
+local void
+bt_torrent_announce_have(BT_Torrent t, uint32 pieceid, Vector(Peer) *v)
+{
+    VECTOR_FOREACH(v, peer, struct bt_peer) {
+        if (!peer->handshake_done)
+            continue;
+        if (bt_peer_haspiece(peer, pieceid))
+            continue;
+        bt_peer_have(peer, pieceid);
+    }
 }
 
 extern int
@@ -457,21 +556,35 @@ bt_torrent_start(BT_Torrent t)
     struct bt_event ev;
     bool running = true;
 
-    BT_EventQueue queue;
-    bt_eventqueue_init(&queue);
+    bt_eventqueue_init(&t->evqueue);
+
+    t->nwant = 0;
 
     while (running) {
-        bt_eventloop_run(&queue, &eloop);
+        bt_eventloop_run(&t->evqueue, &eloop);
 
-        while (!bt_eventqueue_isempty(&queue)) {
-            bt_eventqueue_pop(&queue, &ev);
-            if (ev.a) {
+        while (!bt_eventqueue_isempty(&t->evqueue)) {
+            bt_eventqueue_pop(&t->evqueue, &ev);
+
+            if (ev.type == BT_EVPIECE_COMPLETE) {
+                puts("--- completed ---");
+                BT_Piece piece = ev.a;
+                uint32 i = piece - t->piecetab;
+                bt_torrent_announce_have(t, i, &vp);
+            } else if (ev.a) {
                 bt_peer_handlemessage(t, ev.a, ev.type, ev.b);
             }
         }
 
         bt_markinterest(t, &vp);
-        bt_chokealgo(t, &vp);
+
+        if (should_run_chokealgo(t))
+            bt_chokealgo(t, &vp);
+
+        if (should_run_piecealgo(t))
+            t->nwant = bt_piecealgo(t, t->want, 16);
+
+        t->nwant = bt_piece_request(t, t->want, t->nwant, &vp);
     }
 
     return 0;

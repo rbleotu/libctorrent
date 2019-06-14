@@ -302,6 +302,19 @@ int bt_peer_interested(BT_Peer peer)
     return 0;
 }
 
+int bt_peer_have(BT_Peer peer, uint32 id)
+{
+    struct bt_msg *have = bt_msg_new(BT_MHAVE, id);
+    if (!have) {
+        perror("alloc");
+        bt_errno = BT_EALLOC;
+        return -1;
+    }
+
+    queue_push(peer, have);
+    return 0;
+}
+
 int bt_peer_notinterested(BT_Peer peer)
 {
     if (!peer->am_interested)
@@ -336,6 +349,8 @@ int bt_peer_disconnect(BT_Peer peer)
 
 int bt_peer_requestpiece(BT_Peer peer, uint32 pieceid, uint32 start, uint32 len)
 {
+    printf("requesting %u [%u, %u]\n", pieceid, start, len);
+
     struct bt_msg *req = bt_msg_new(BT_MREQUEST, pieceid, start, len);
     if (!req) {
         perror("alloc");
@@ -349,6 +364,8 @@ int bt_peer_requestpiece(BT_Peer peer, uint32 pieceid, uint32 start, uint32 len)
 
 int bt_peer_sendpiece(BT_Peer peer, byte buf[], uint32 pieceid, uint32 off, uint32 len)
 {
+    peer->downloaded += len;
+
     return 0;
 }
 
@@ -494,15 +511,13 @@ peer_onhave(BT_Torrent t, BT_Peer peer, size_t piecei)
     byte ip[4];
     PUT_U32BE(ip, peer->ipv4);
 
-    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] have\n", ip[0], ip[1], ip[2], ip[3]);
+    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] have %zu\n", ip[0], ip[1], ip[2], ip[3], piecei);
 
     bt_bitset_set(peer->pieces, piecei);
 
     BT_Piece piece = bt_torrent_get_piece(t, piecei);
     bt_piece_incrfreq(piece);
 
-    printf("piece = %x\n", piecei);
-    printf("total = %.2lf\n", 100. * bt_peer_progress(t, peer));
     return 0;
 }
 
@@ -556,6 +571,12 @@ peer_onpiece(BT_Torrent t, BT_Peer peer, const byte data[], uint32 index, uint32
     BT_Piece piece = bt_torrent_get_piece(t, index);
     bt_piece_incrdlrover(piece, len);
 
+    peer->uploaded += len;
+
+    if (bt_piece_complete(piece)) {
+        bt_torrent_piece_completed(t, piece);
+    }
+
     //byte *buf = bt_piececache_alloc(piece, off, len);
     //if (!buf) {
     //    perror("cache read()");
@@ -568,6 +589,15 @@ peer_onpiece(BT_Torrent t, BT_Peer peer, const byte data[], uint32 index, uint32
     //if (bt_piececache_complete(piece)) {
     //    bt_piececache_flush(piece);
     //}
+}
+
+local int
+peer_onrequest(BT_Torrent t, BT_Peer peer, uint32 id, uint32 off, uint32 len)
+{
+    byte ip[4];
+    PUT_U32BE(ip, peer->ipv4);
+
+    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] REQUEST\n", ip[0], ip[1], ip[2], ip[3]);
 }
 
 local int
@@ -619,4 +649,30 @@ bool
 bt_peer_haspiece(BT_Peer peer, uint32 piecei)
 {
     return bt_bitset_get(peer->pieces, piecei);
+}
+
+uint32 bt_peer_ulrate(BT_Peer peer)
+{
+    if (!peer)
+        return 0;
+    return peer->uploaded;
+}
+
+uint32 bt_peer_dlrate(BT_Peer peer)
+{
+    if (!peer)
+        return 0;
+    return peer->downloaded;
+}
+
+int bt_peer_requestpiecefull(BT_Peer peer, BT_Piece piece, uint32 id)
+{
+    bt_piece_mark_downloading(piece);
+    size_t off = piece->dlnext;
+
+    while (off < piece->length) {
+        uint32 n = MIN(1<<14, piece->length - off);
+        bt_peer_requestpiece(peer, id, off, n);
+        off += n;
+    }
 }

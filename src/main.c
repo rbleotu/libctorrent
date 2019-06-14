@@ -32,7 +32,7 @@ sprinttime(char dest[], size_t n)
 static void
 cli_logger(int type, const char *fmt, ...)
 {
-    char strtime[16];
+    char strtime[32];
     size_t len = strlen(fmt);
     va_list ap;
 
