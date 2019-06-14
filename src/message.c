@@ -365,6 +365,14 @@ bt_msg_pack(byte dest[], struct bt_msg *msg)
             memcpy(dest+i, hsk->peer_id, 20), i += 20;
             break;
         }
+    case BT_MREQUEST:
+        {
+            struct bt_msg_request *req = (void *)msg;
+            PUT_U32BE(dest + i, req->piecei), i += 4;
+            PUT_U32BE(dest + i, req->begin), i += 4;
+            PUT_U32BE(dest + i, req->length), i += 4;
+        }
+        break;
     default:
         assert (!"not implmented");
     }

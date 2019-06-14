@@ -8,6 +8,7 @@
 #include "util/error.h"
 #include "peer.h"
 #include "message.h"
+#include "piece.h"
 #include "net.h"
 #include "../include/torrent.h"
 #include "torrentx.h"
@@ -146,9 +147,6 @@ on_read(BT_EventProducer *prod, BT_EventQueue *queue)
 
         while (has_message(this->rxbuf, this->rxhave)) {
             struct bt_msg *msg = bt_msg_unpack(this->rxbuf);
-            if (msg->id == 4) {
-                printf("%x\n", ((struct bt_msg_have *)msg)->piecei);
-            }
 
             memmove(this->rxbuf, this->rxbuf + bt_msg_len(msg), this->rxhave - bt_msg_len(msg));
             this->rxhave -= bt_msg_len(msg);
@@ -257,6 +255,9 @@ int bt_peer_connect(BT_Peer peer, uint32 ipv4, uint16 port)
 
 int bt_peer_choke(BT_Peer peer)
 {
+    if (peer->am_choking)
+        return 0;
+
     peer->am_choking = true;
     struct bt_msg *choke = bt_msg_new(BT_MCHOKE);
     if (!choke) {
@@ -429,7 +430,6 @@ peer_onhandshake(BT_Torrent t, BT_Peer peer, struct bt_handshake *hshk)
     puts("... handshake OK!");
 
     bt_peer_interested(peer);
-    bt_peer_unchoke(peer);
     return 0;
 }
 
@@ -474,6 +474,7 @@ peer_onunchoke(BT_Torrent t, BT_Peer peer)
 
     printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] unchoke\n", ip[0], ip[1], ip[2], ip[3]);
     peer->peer_choking = false;
+
     return 0;
 }
 
@@ -497,6 +498,9 @@ peer_onhave(BT_Torrent t, BT_Peer peer, size_t piecei)
 
     bt_bitset_set(peer->pieces, piecei);
 
+    BT_Piece piece = bt_torrent_get_piece(t, piecei);
+    bt_piece_incrfreq(piece);
+
     printf("piece = %x\n", piecei);
     printf("total = %.2lf\n", 100. * bt_peer_progress(t, peer));
     return 0;
@@ -505,10 +509,22 @@ peer_onhave(BT_Torrent t, BT_Peer peer, size_t piecei)
 local int
 peer_ondisconnect(BT_Torrent t, BT_Peer peer)
 {
-    byte ip[4];
-    PUT_U32BE(ip, peer->ipv4);
+    if (peer->connected) {
+        byte ip[4];
+        PUT_U32BE(ip, peer->ipv4);
 
-    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] disconnect\n", ip[0], ip[1], ip[2], ip[3]);
+        printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] disconnect\n", ip[0], ip[1], ip[2], ip[3]);
+    }
+
+    if (peer->handshake_done) {
+        for (size_t i=0; i<t->npieces; i++) {
+            if (bt_bitset_get(peer->pieces, i)) {
+                BT_Piece piece = bt_torrent_get_piece(t, i);
+                bt_piece_decrfreq(piece);
+            }
+        }
+    }
+
     bt_peer_disconnect(peer);
     return 0;
 }
@@ -522,22 +538,42 @@ peer_onbitfield(BT_Torrent t, BT_Peer peer, byte set[], size_t n)
     printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] bitfield\n", ip[0], ip[1], ip[2], ip[3]);
 
     bt_bitset_read_arr(peer->pieces, set, n);
+    for (size_t i=0; i<t->npieces; i++) {
+        if (bt_bitset_get(peer->pieces, i)) {
+            BT_Piece piece = bt_torrent_get_piece(t, i);
+            bt_piece_incrfreq(piece);
+        }
+    }
+
     return 0;
 }
 
 local int
-peer_onpiece()
+peer_onpiece(BT_Torrent t, BT_Peer peer, const byte data[], uint32 index, uint32 off, uint32 len)
 {
+    printf("got piece: %u %u %u\n", index, off, len);
 
+    BT_Piece piece = bt_torrent_get_piece(t, index);
+    bt_piece_incrdlrover(piece, len);
+
+    //byte *buf = bt_piececache_alloc(piece, off, len);
+    //if (!buf) {
+    //    perror("cache read()");
+    //    return -1;
+    //}
+
+    //memcpy(buf, data, len);
+    //bt_piececache_markdirty(piece, off, len);
+
+    //if (bt_piececache_complete(piece)) {
+    //    bt_piececache_flush(piece);
+    //}
 }
 
-int
-bt_peer_handlemessage(BT_Torrent t, BT_Peer peer, int msg, void *data)
+local int
+dispatch(int ev, BT_Torrent t, BT_Peer peer, void *data)
 {
-    assert (t != NULL);
-    assert (peer != NULL);
-
-    switch (msg) {
+    switch (ev) {
         HANDLE_EVENT(t, peer, EVPEER_CONNECT, peer_onconnect);
         HANDLE_EVENT(t, peer, EVPEER_HANDSHAKE, peer_onhandshake);
         HANDLE_EVENT(t, peer, EVPEER_DISCONNECT, peer_ondisconnect);
@@ -547,13 +583,22 @@ bt_peer_handlemessage(BT_Torrent t, BT_Peer peer, int msg, void *data)
         HANDLE_EVENT(t, peer, EVPEER_UNCHOKE, peer_onunchoke);
         HANDLE_EVENT(t, peer, EVPEER_KEEPALIVE, peer_onkeepalive);
         HANDLE_EVENT(t, peer, EVPEER_BITFIELD, peer_onbitfield);
-    default:
-        putc('\n', stdout);
-        break;
+        HANDLE_EVENT(t, peer, EVPEER_PIECE, peer_onpiece);
     }
-
-    bt_msg_free(data);
     return 0;
+}
+
+int
+bt_peer_handlemessage(BT_Torrent t, BT_Peer peer, int ev, void *data)
+{
+    assert (t != NULL);
+    assert (peer != NULL);
+
+    const int ec = dispatch(ev, t, peer, data);
+    if (data)
+        bt_msg_free(data);
+
+    return ec;
 }
 
 double bt_peer_progress(BT_Torrent t, BT_Peer peer)
@@ -568,4 +613,10 @@ double bt_peer_progress(BT_Torrent t, BT_Peer peer)
     }
 
     return (double)have / t->size;
+}
+
+bool
+bt_peer_haspiece(BT_Peer peer, uint32 piecei)
+{
+    return bt_bitset_get(peer->pieces, piecei);
 }

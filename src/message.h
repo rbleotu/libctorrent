@@ -15,6 +15,8 @@
 #define HANDLE_EVPEER_NOTINTERESTED(t,p,c,d) (c)(t,p)
 #define HANDLE_EVPEER_KEEPALIVE(t,p,c,d)     (c)(t,p)
 #define HANDLE_EVPEER_BITFIELD(t,p,c,d)      (c)(t,p,((struct bt_msg_bitfield *)(d))->bitfield, ((struct bt_msg_bitfield *)(d))->len)
+#define HANDLE_EVPEER_PIECE(t,p,c,d) \
+    (c)(t,p,((struct bt_msg_piece *)d)->block, ((struct bt_msg_piece *)d)->piecei, ((struct bt_msg_piece *)d)->begin, ((struct bt_msg_piece *)d)->len - 9)
 
 enum {
     BT_MCHOKE,

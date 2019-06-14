@@ -5,6 +5,7 @@
 #include <setjmp.h>
 #include <string.h>
 #include <stdarg.h>
+#include <time.h>
 
 #include "util/common.h"
 #include "bcode.h"
@@ -18,6 +19,8 @@
 #include "torrentx.h"
 #include "util/vector.h"
 #include "peer.h"
+
+VECTOR_DEFINE(struct bt_peer, Peer);
 
 local inline unsigned
 hex_value(char h)
@@ -160,8 +163,8 @@ init_pieces(BT_Torrent t, BT_BCode pieces)
             bt_errno = BT_EFORMAT;
             return -1;
         }
-        bt_piece_init(i, t->size - rem, MIN(rem, plen));
-        memcpy(i->hash, *hash_tab, SHA1_DIGEST_LEN);
+
+        bt_piece_init(i, MIN(rem, plen),*hash_tab);
         n -= SHA1_DIGEST_LEN, ++hash_tab;
         rem -= i->length;
     }
@@ -384,7 +387,47 @@ bt_torrent_add_action(BT_Torrent t, int ev, void *h)
 {
 }
 
-VECTOR_DEFINE(struct bt_peer, Peer);
+local void
+bt_markinterest(BT_Torrent t, Vector(Peer) *v)
+{
+    VECTOR_FOREACH(v, peer, struct bt_peer) {
+        if (peer->handshake_done) {
+            bool interested = false;
+
+            for (size_t i=0; i<t->npieces; i++) {
+                if (bt_torrent_has_piece(t, i))
+                    continue;
+                if (bt_peer_haspiece(peer, i)) {
+                    interested = true;
+                    break;
+                }
+            }
+
+            if (interested)
+                bt_peer_interested(peer);
+            else
+                bt_peer_notinterested(peer);
+        }
+    }
+}
+
+local void
+bt_chokealgo(BT_Torrent t, Vector(Peer) *v)
+{
+    VECTOR_FOREACH(v, peer, struct bt_peer) {
+        if (!peer->handshake_done)
+            continue;
+    }
+
+    t->last_chokealgo = time(NULL);
+}
+
+local bool
+should_run_chokealgo(BT_Torrent t)
+{
+    time_t now = time(NULL);
+    return t->last_chokealgo - now > UNCHOKE_DT;
+}
 
 extern int
 bt_torrent_start(BT_Torrent t)
@@ -426,10 +469,14 @@ bt_torrent_start(BT_Torrent t)
                 bt_peer_handlemessage(t, ev.a, ev.type, ev.b);
             }
         }
+
+        bt_markinterest(t, &vp);
+        bt_chokealgo(t, &vp);
     }
 
     return 0;
 }
+
 
 extern int
 bt_torrent_pause(BT_Torrent t)
@@ -450,17 +497,17 @@ bt_torrent_check(BT_Torrent t)
         return -1;
     }
 
-    for (unsigned i = 0; i < t->npieces; i++) {
-        if (bt_disk_read_piece(t->mgr, data, t->piecetab[i].length,
-                               t->piecetab[i].off) < 0)
-            return -1;
-        bt_sha1(hash, data, t->piecetab[i].length);
-        if (check_hash(hash, t->piecetab[i].hash)) {
-            t->piecetab[i].have = 1;
-            t->size_have += t->piecetab[i].length;
-            t->nhave++;
-        }
-    }
+    //for (unsigned i = 0; i < t->npieces; i++) {
+    //    if (bt_disk_read_piece(t->mgr, data, t->piecetab[i].length,
+    //                           t->piecetab[i].off) < 0)
+    //        return -1;
+    //    bt_sha1(hash, data, t->piecetab[i].length);
+    //    if (check_hash(hash, t->piecetab[i].hash)) {
+    //        t->piecetab[i].have = 1;
+    //        t->size_have += t->piecetab[i].length;
+    //        t->nhave++;
+    //    }
+    //}
 
     free(data);
     return 0;

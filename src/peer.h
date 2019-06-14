@@ -76,5 +76,6 @@ int bt_peer_sendpiece(BT_Peer, byte data[], uint32 pieceid, uint32 start, uint32
 int bt_peer_recvmsg(BT_Peer peer);
 int bt_peer_handlemessage(BT_Torrent t, BT_Peer peer, int msgtype, void *data);
 double bt_peer_progress(BT_Torrent t, BT_Peer peer);
+bool bt_peer_haspiece(BT_Peer peer, uint32 piecei);
 
 #endif

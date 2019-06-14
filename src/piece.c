@@ -7,110 +7,57 @@
 #include "util/common.h"
 #include "util/error.h"
 #include "crypt/sha1.h"
-#include "disk.h"
 #include "piece.h"
 
-int
-bt_piece_init(BT_Piece p, off_t off, size_t len)
+void bt_piece_init(BT_Piece p, uint32 len, const byte hash[SHA1_DIGEST_LEN])
 {
-    p->off = off;
+    p->downloading = false;
     p->length = len;
-    p->have = 0;
+    memcpy(p->hash, hash, sizeof(p->hash));
     p->freq = 0;
-    p->chunks = bt_bitset_new(CEIL_DIV(len, CHUNK_SZ));
-    p->data = NULL;
-    pthread_mutex_init(&p->lock, NULL);
-    return p->chunks ? 0 : -1;
 }
 
-size_t
-bt_piece_empty_chunk(BT_Piece p)
+void bt_piece_mark_downloading(BT_Piece p)
 {
-    size_t i = 0, nc = CEIL_DIV(p->length, CHUNK_SZ);
-    for (; i < nc; i++)
-        if (!bt_bitset_get(p->chunks, i))
-            return i;
-    return i;
+    p->downloading = true;
 }
 
-int
-bt_piece_add_chunk(BT_Piece p, size_t i, uint8 data[])
+bool bt_piece_isdownloading(BT_Piece p)
 {
-    size_t off = i * CHUNK_SZ;
-    size_t chlen = MIN(off + CHUNK_SZ, p->length) - off;
-    pthread_mutex_lock(&p->lock);
-    bt_bitset_set(p->chunks, i);
-    if (!p->data) {
-        p->data = bt_malloc(p->length);
-        if (!p->data) {
-            bt_errno = BT_EALLOC;
-            return -1;
-        }
-    }
-    pthread_mutex_unlock(&p->lock);
-    memcpy(p->data + off, data, chlen);
-    size_t n = 0, nc = CEIL_DIV(p->length, CHUNK_SZ);
-    for (; n < nc; n++)
-        if (!bt_bitset_get(p->chunks, n))
-            return 0;
-    p->have = 1;
-    return 0;
+    return p->downloading;
 }
 
-int
-bt_piece_check(BT_Piece p)
+double bt_piece_calcscore(BT_Piece p)
 {
-    assert(p->data);
-    uint8 hash[SHA1_DIGEST_LEN];
-    bt_sha1(hash, p->data, p->length);
-    if (!memcmp(hash, p->data, SHA1_DIGEST_LEN))
-        return 0;
-    return -1;
+    if (!p->freq)
+        return 0.f;
+    if (p->downloading)
+        return 0.f;
+    return 1.f;
 }
 
-void
-bt_piece_fprint(FILE *to, BT_Piece p)
+void bt_piece_incrfreq(BT_Piece p)
 {
-    putc('[', to);
-    size_t nc = CEIL_DIV(p->length, CHUNK_SZ);
-    for (size_t i = 0; i < nc; i++) {
-        if (bt_bitset_get(p->chunks, i))
-            putc('|', to);
-        else
-            putc(' ', to);
-    }
-    fputs("]\n", to);
+    p->freq++;
 }
 
-int
-bt_piece_load(BT_Piece p, BT_DiskMgr m)
+void bt_piece_decrfreq(BT_Piece p)
 {
-    assert(p && m);
-    if (!p->data) {
-        p->data = bt_malloc(p->length);
-        if (!p->data)
-            return -1;
-    }
-    return bt_disk_read_piece(m, p->data, p->length, p->off);
+    p->freq--;
 }
 
-int
-bt_piece_save(BT_Piece p, BT_DiskMgr m)
+bool bt_piece_complete(BT_Piece p)
 {
-    assert(p && m && p->data);
-    int err = bt_disk_write_piece(m, p->data, p->length, p->off);
-    return err;
+    return p->dlnext == p->length;
 }
 
-// int
-// bt_piece_check(BT_DiskMgr m, BT_Piece p)
-//{
-//    // uint8_t hash[SHA1_DIGEST_LEN];
-//    // uint8_t *data = bt_disk_get_piece(m, p);
-//    // if (!data)
-//    //    return -1;
-//    // bt_sha1(hash, data, p->length);
-//    // int cmp = memcmp(hash, p->hash, SHA1_DIGEST_LEN);
-//    // free(data);
-//    return 0;
-//}
+uint32 bt_piece_dlrover(BT_Piece piece)
+{
+    return piece->dlnext;
+}
+
+void bt_piece_incrdlrover(BT_Piece piece, uint32 n)
+{
+    n = MIN(n, piece->length - piece->dlnext);
+    piece->dlnext += n;
+}
