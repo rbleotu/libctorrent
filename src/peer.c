@@ -38,7 +38,7 @@ has_message(const byte src[], size_t sz)
 {
     if (sz < 4)
         return false;
-    size_t len;
+    size_t len = 0;
     GET_U32BE(src, len);
     if (sz < len+4)
         return false;
@@ -117,10 +117,10 @@ on_read(BT_EventProducer *prod, BT_EventQueue *queue)
         }
 
         this->rxhave += n;
+        assert (this->rxhave <= HSHK_LEN);
 
         if (has_handshake(this->rxbuf, this->rxhave)) {
             struct bt_handshake *hshk = bt_handshake_unpack(this->rxbuf);
-            memmove(this->rxbuf, this->rxbuf + HSHK_LEN, HSHK_LEN);
             this->rxhave -= HSHK_LEN;
 
             bt_eventqueue_push(queue, BT_EVENT(BT_EVPEER_HANDSHAKE, this, hshk));
@@ -141,21 +141,19 @@ on_read(BT_EventProducer *prod, BT_EventQueue *queue)
         return 1;
     }
 
-    bool pushed = false;
-
     do {
         this->rxhave += n;
-        pushed = false;
 
-        if (this->handshake_done) {
-            if (has_message(this->rxbuf, this->rxhave)) {
-                struct bt_msg *msg = bt_msg_unpack(this->rxbuf);
-                memmove(this->rxbuf, this->rxbuf + bt_msg_len(msg), bt_msg_len(msg));
-                this->rxhave -= bt_msg_len(msg);
-
-                bt_eventqueue_push(queue, BT_EVENT(msg2event(msg->id), this, msg));
-                pushed =  true;
+        while (has_message(this->rxbuf, this->rxhave)) {
+            struct bt_msg *msg = bt_msg_unpack(this->rxbuf);
+            if (msg->id == 4) {
+                printf("%x\n", ((struct bt_msg_have *)msg)->piecei);
             }
+
+            memmove(this->rxbuf, this->rxbuf + bt_msg_len(msg), this->rxhave - bt_msg_len(msg));
+            this->rxhave -= bt_msg_len(msg);
+
+            bt_eventqueue_push(queue, BT_EVENT(msg2event(msg->id), this, msg));
         }
 
         n = net_tcp_recv(this->sockfd, this->rxbuf + this->rxhave, sizeof(this->rxbuf) - this->rxhave);
@@ -163,7 +161,7 @@ on_read(BT_EventProducer *prod, BT_EventQueue *queue)
             perror("recv()");
             return -1;
         }
-    } while (n || pushed);
+    } while(n);
 
     return 0;
 }
@@ -496,7 +494,11 @@ peer_onhave(BT_Torrent t, BT_Peer peer, size_t piecei)
     PUT_U32BE(ip, peer->ipv4);
 
     printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] have\n", ip[0], ip[1], ip[2], ip[3]);
+
     bt_bitset_set(peer->pieces, piecei);
+
+    printf("piece = %x\n", piecei);
+    printf("total = %.2lf\n", 100. * bt_peer_progress(t, peer));
     return 0;
 }
 
@@ -512,13 +514,21 @@ peer_ondisconnect(BT_Torrent t, BT_Peer peer)
 }
 
 local int
-peer_onbitfield(BT_Torrent t, BT_Peer peer, const byte set[], size_t n)
+peer_onbitfield(BT_Torrent t, BT_Peer peer, byte set[], size_t n)
 {
     byte ip[4];
     PUT_U32BE(ip, peer->ipv4);
 
     printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] bitfield\n", ip[0], ip[1], ip[2], ip[3]);
+
+    bt_bitset_read_arr(peer->pieces, set, n);
     return 0;
+}
+
+local int
+peer_onpiece()
+{
+
 }
 
 int
@@ -544,4 +554,18 @@ bt_peer_handlemessage(BT_Torrent t, BT_Peer peer, int msg, void *data)
 
     bt_msg_free(data);
     return 0;
+}
+
+double bt_peer_progress(BT_Torrent t, BT_Peer peer)
+{
+    const size_t n = t->npieces;
+    uint64 have = 0;
+
+    for (size_t i=0; i<n; i++) {
+        if (bt_bitset_get(peer->pieces, i)) {
+            have += t->piece_length;
+        }
+    }
+
+    return (double)have / t->size;
 }

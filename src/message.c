@@ -228,8 +228,9 @@ bt_msg_unpack(const uint8 buf[])
     switch (id) {
     case BT_MHAVE: {
         struct bt_msg_have *have = (void *)msg;
-        GET_U32BE(buf + BT_MSG_LEN, have->piecei);
-    } break;
+        GET_U32BE(buf + 5, have->piecei);
+        break;
+    }
     case BT_MBITFIELD: {
         struct bt_msg_bitfield *bfield = (void *)msg;
         memcpy(bfield->bitfield, buf + 5, len - 1);

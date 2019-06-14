@@ -50,7 +50,7 @@ int bt_peerserver_listen(struct bt_peerserver *server)
 
     server->emitter = (struct bt_eventproducer) {
         .on_write = NULL,
-        .on_read = on_accept,
+        .on_read = NULL,
         .on_destroy = NULL,
     };
 
