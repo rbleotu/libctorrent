@@ -4,6 +4,18 @@
 #include "crypt/sha1.h"
 #include "util/common.h"
 
+#define HANDLE_EVENT(t,p,e,c) case (BT_##e): return HANDLE_##e((t), (p), (c), (data))
+#define HANDLE_EVPEER_CONNECT(t,p,c,d)       (c)(t,p)
+#define HANDLE_EVPEER_HANDSHAKE(t,p,c,d)     (c)(t,p,(struct bt_handshake *)(d))
+#define HANDLE_EVPEER_DISCONNECT(t,p,c,d)    (c)(t,p)
+#define HANDLE_EVPEER_HAVE(t,p,c,d)          (c)(t,p,((struct bt_msg_have *)(d))->piecei)
+#define HANDLE_EVPEER_CHOKE(t,p,c,d)         (c)(t,p)
+#define HANDLE_EVPEER_UNCHOKE(t,p,c,d)       (c)(t,p)
+#define HANDLE_EVPEER_INTERESTED(t,p,c,d)    (c)(t,p)
+#define HANDLE_EVPEER_NOTINTERESTED(t,p,c,d) (c)(t,p)
+#define HANDLE_EVPEER_KEEPALIVE(t,p,c,d)     (c)(t,p)
+#define HANDLE_EVPEER_BITFIELD(t,p,c,d)      (c)(t,p,((struct bt_msg_bitfield *)(d))->bitfield, ((struct bt_msg_bitfield *)(d))->len)
+
 enum {
     BT_MCHOKE,
     BT_MUNCHOKE,

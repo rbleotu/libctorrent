@@ -421,7 +421,6 @@ bt_torrent_start(BT_Torrent t)
         bt_eventloop_run(&queue, &eloop);
 
         while (!bt_eventqueue_isempty(&queue)) {
-            ev = EVENT_INIT();
             bt_eventqueue_pop(&queue, &ev);
             if (ev.a) {
                 bt_peer_handlemessage(t, ev.a, ev.type, ev.b);

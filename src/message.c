@@ -19,8 +19,8 @@ local struct bt_msg prepared[] = {
         [BT_MCHOKE] =          {1, BT_MCHOKE},
         [BT_MUNCHOKE] =        {1, BT_MUNCHOKE},
         [BT_MINTERESTED] =     {1, BT_MINTERESTED},
-        [BT_MNOT_INTERESTED] = {1, BT_MNOT_INTERESTED}};
-
+        [BT_MNOT_INTERESTED] = {1, BT_MNOT_INTERESTED}
+};
 
 struct bt_msg *
 bt_msg_new(int id, ...)
@@ -342,7 +342,7 @@ bt_msg_pack(byte dest[], struct bt_msg *msg)
     uint32 i = 0;
     if (msg->id < BT_MSG_CNT) {
         PUT_U32BE(dest + i, msg->len), i += 4;
-        PUT_U32BE(dest + i, msg->id), i += 1;
+        dest[i] = msg->id, i++;
     }
 
     if (msg->id < BT_MHAVE)

@@ -399,68 +399,149 @@ valid_handshake(BT_Torrent t)
     return true;
 }
 
+local int
+peer_onconnect(BT_Torrent t, BT_Peer peer)
+{
+    byte ip[4];
+    PUT_U32BE(ip, peer->ipv4);
+    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] connected\n", ip[0], ip[1], ip[2], ip[3]);
+
+    peer->connected = true;
+
+    byte peer_id[20] = "hello world";
+    struct bt_handshake *hshk = bt_handshake(t->info_hash, peer_id);
+    bt_peer_handshake(peer, hshk);
+
+    return 0;
+}
+
+local int
+peer_onhandshake(BT_Torrent t, BT_Peer peer, struct bt_handshake *hshk)
+{
+    byte ip[4];
+    PUT_U32BE(ip, peer->ipv4);
+    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] handshake\n", ip[0], ip[1], ip[2], ip[3]);
+
+    if (!valid_handshake(t)) {
+        bt_peer_disconnect(peer);
+        return 0;
+    }
+
+    peer->handshake_done = true;
+    puts("... handshake OK!");
+
+    bt_peer_interested(peer);
+    bt_peer_unchoke(peer);
+    return 0;
+}
+
+local int
+peer_oninterested(BT_Torrent t, BT_Peer peer)
+{
+    byte ip[4];
+    PUT_U32BE(ip, peer->ipv4);
+
+    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] interested\n", ip[0], ip[1], ip[2], ip[3]);
+    peer->peer_interested = true;
+    return 0;
+}
+
+local inline int
+peer_onnotinterested(BT_Torrent t, BT_Peer peer)
+{
+    byte ip[4];
+    PUT_U32BE(ip, peer->ipv4);
+
+    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] not interested\n", ip[0], ip[1], ip[2], ip[3]);
+    peer->peer_interested = false;
+    return 0;
+}
+
+local inline int
+peer_onchoke(BT_Torrent t, BT_Peer peer)
+{
+    byte ip[4];
+    PUT_U32BE(ip, peer->ipv4);
+
+    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] choke\n", ip[0], ip[1], ip[2], ip[3]);
+    peer->peer_choking = true;
+    return 0;
+}
+
+local inline int
+peer_onunchoke(BT_Torrent t, BT_Peer peer)
+{
+    byte ip[4];
+    PUT_U32BE(ip, peer->ipv4);
+
+    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] unchoke\n", ip[0], ip[1], ip[2], ip[3]);
+    peer->peer_choking = false;
+    return 0;
+}
+
+local int
+peer_onkeepalive(BT_Torrent t, BT_Peer peer)
+{
+    byte ip[4];
+    PUT_U32BE(ip, peer->ipv4);
+
+    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] keepalive\n", ip[0], ip[1], ip[2], ip[3]);
+    return 0;
+}
+
+local int
+peer_onhave(BT_Torrent t, BT_Peer peer, size_t piecei)
+{
+    byte ip[4];
+    PUT_U32BE(ip, peer->ipv4);
+
+    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] have\n", ip[0], ip[1], ip[2], ip[3]);
+    bt_bitset_set(peer->pieces, piecei);
+    return 0;
+}
+
+local int
+peer_ondisconnect(BT_Torrent t, BT_Peer peer)
+{
+    byte ip[4];
+    PUT_U32BE(ip, peer->ipv4);
+
+    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] disconnect\n", ip[0], ip[1], ip[2], ip[3]);
+    bt_peer_disconnect(peer);
+    return 0;
+}
+
+local int
+peer_onbitfield(BT_Torrent t, BT_Peer peer, const byte set[], size_t n)
+{
+    byte ip[4];
+    PUT_U32BE(ip, peer->ipv4);
+
+    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] bitfield\n", ip[0], ip[1], ip[2], ip[3]);
+    return 0;
+}
+
 int
 bt_peer_handlemessage(BT_Torrent t, BT_Peer peer, int msg, void *data)
 {
     assert (t != NULL);
     assert (peer != NULL);
 
-    byte ip[4];
-    PUT_U32BE(ip, peer->ipv4);
-    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] ", ip[0], ip[1], ip[2], ip[3]);
-
     switch (msg) {
-    case  BT_EVPEER_CONNECT:
-        peer->connected = true;
-        puts("connected");
-        {
-            byte peer_id[20] = "hello world";
-            struct bt_handshake *hshk = bt_handshake(t->info_hash, peer_id);
-            bt_peer_handshake(peer, hshk);
-            puts("sent handshake");
-        }
-        break;
-    case BT_EVPEER_HANDSHAKE:
-        puts("received handshake ...");
-        {
-            struct bt_handshake *hshk = data;
-            if (!valid_handshake(t)) {
-                bt_peer_disconnect(peer);
-            } else {
-                peer->handshake_done = true;
-                puts("... handshake OK!");
-            }
-            free(hshk);
-        }
-        break;
-    case BT_EVPEER_DISCONNECT:
-        bt_peer_disconnect(peer);
-        puts("disconnected");
-        break;
-    case BT_EVPEER_HAVE:
-        puts("got have msg");
-        break;
-    case BT_EVPEER_PIECE:
-        puts("got piece msg");
-        break;
-    case BT_EVPEER_INTERESTED:
-        peer->peer_interested = true;
-        puts("interested");
-        break;
-    case BT_EVPEER_NOTINTERESTED:
-        peer->peer_interested = false;
-        puts("not interested");
-        break;
-    case BT_EVPEER_UNCHOKE:
-        peer->peer_choking = false;
-        break;
-    case BT_EVPEER_KEEPALIVE:
-        puts("keepalive");
-        break;
+        HANDLE_EVENT(t, peer, EVPEER_CONNECT, peer_onconnect);
+        HANDLE_EVENT(t, peer, EVPEER_HANDSHAKE, peer_onhandshake);
+        HANDLE_EVENT(t, peer, EVPEER_DISCONNECT, peer_ondisconnect);
+        HANDLE_EVENT(t, peer, EVPEER_HAVE, peer_onhave);
+        HANDLE_EVENT(t, peer, EVPEER_INTERESTED, peer_oninterested);
+        HANDLE_EVENT(t, peer, EVPEER_NOTINTERESTED, peer_onnotinterested);
+        HANDLE_EVENT(t, peer, EVPEER_UNCHOKE, peer_onunchoke);
+        HANDLE_EVENT(t, peer, EVPEER_KEEPALIVE, peer_onkeepalive);
+        HANDLE_EVENT(t, peer, EVPEER_BITFIELD, peer_onbitfield);
     default:
         putc('\n', stdout);
         break;
     }
 
+    bt_msg_free(data);
     return 0;
 }
