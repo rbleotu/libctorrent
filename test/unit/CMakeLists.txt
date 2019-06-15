@@ -18,3 +18,17 @@ add_test (
     NAME test_peer
     COMMAND $<TARGET_FILE:test_peer>
 )
+
+add_executable (test_bitset test_bitset.c)
+target_link_libraries (test_bitset ctorrent)
+add_test (
+    NAME test_bitset
+    COMMAND $<TARGET_FILE:test_bitset>
+)
+
+add_executable (test_timer test_timer.c)
+target_link_libraries (test_timer ctorrent)
+add_test (
+    NAME test_timer
+    COMMAND $<TARGET_FILE:test_timer>
+)

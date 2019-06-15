@@ -1,6 +1,7 @@
 #include <signal.h>
 #include <sys/time.h>
 #include <pthread.h>
+#include <sys/timerfd.h>
 #include <unistd.h>
 
 #include <stdio.h>
@@ -8,152 +9,185 @@
 #include <assert.h>
 #include <string.h>
 
-#include "util/error.h"
 #include "util/common.h"
+#include "util/error.h"
 #include "timer_queue.h"
 
-local volatile sig_atomic_t got_alarm;
+#define swap(a,b) do{                 \
+    typeof(a) _tmp;                   \
+    _tmp = (b), (b) = (a), (a) = _tmp;\
+} while(0)
 
-struct bt_tqueue {
-    pthread_mutex_t lock;
-    volatile size_t n;
-    size_t cap;
-
-    struct bt_timer v[];
-};
-
-local int pipefd[2];
-
-BT_TQueue
-bt_tqueue_new(size_t cap)
+local int
+timerqueue_getrem(BT_TimerQueue *tq, struct itimerspec *out)
 {
-    BT_TQueue tq = malloc(sizeof(*tq) + sizeof(struct bt_timer[cap]));
-    if (!tq) {
-        bt_errno = BT_EALLOC;
-        return NULL;
-    }
-    tq->n = 0, tq->cap = cap;
-    pthread_mutex_init(&tq->lock, NULL);
-    return tq;
-}
-
-local inline unsigned
-timer_get(void)
-{
-    struct itimerval tmval;
-    getitimer(ITIMER_REAL, &tmval);
-    return tmval.it_value.tv_usec / 500000UL + tmval.it_value.tv_sec;
-}
-
-local void
-alarm_handler(int sig)
-{
-    uint8 x = 1;
-    got_alarm = 1;
-    write(pipefd[1], &x, 1);
-}
-
-local inline int
-timer_disable(void)
-{
-    struct sigaction sa = {.sa_handler = SIG_IGN, .sa_flags = 0};
-    sigemptyset(&sa.sa_mask);
-    if (sigaction(SIGALRM, &sa, NULL) == -1)
+    const int ec = timerfd_gettime(tq->timerfd, out);
+    if (ec) {
+        perror("timerfd_gettime");
         return -1;
-    struct itimerval tmval = {{0, 0}, {0, 0}};
-    return setitimer(ITIMER_REAL, &tmval, NULL);
+    }
+    return 0;
 }
 
 local int
-timer_enable(struct bt_timer tm)
+timerqueue_arm(BT_TimerQueue *tq)
 {
-    struct sigaction sa = {.sa_handler = alarm_handler,
-                           .sa_flags = 0};
-    sigemptyset(&sa.sa_mask);
-    if (sigaction(SIGALRM, &sa, NULL) == -1)
+    if (!tq->ntimers)
+        return 0;
+
+    BT_Timer front = tq->queue[0];
+
+    struct itimerspec ispec = front->value;
+
+    if (timerfd_settime(tq->timerfd, 0, &ispec, NULL) < 0) {
+        perror("timerfd_settime()");
         return -1;
-    struct itimerval tmval = {{0, 0}, {tm.nsec, 1}};
-    return setitimer(ITIMER_REAL, &tmval, NULL);
-}
-
-local void
-sink(struct bt_timer v[], size_t n, struct bt_timer tm)
-{
-    while (n--) {
-        if (v[n].nsec > tm.nsec) {
-            v[n].nsec -= tm.nsec;
-            break;
-        } else {
-            tm.nsec -= v[n].nsec;
-            v[n + 1] = v[n];
-        }
     }
-    v[n + 1] = tm;
-}
 
-void
-bt_tqueue_fprint(BT_TQueue tq)
-{
-    putc('[', stdout);
-    for (size_t i = tq->n; i--;) {
-        printf("%u ", tq->v[i].nsec);
-    }
-    puts("]");
-}
-
-int
-bt_tqueue_insert(BT_TQueue tq, struct bt_timer tm)
-{
-    assert(tq);
-    if (tq->n >= tq->cap)
-        return -1;
-
-    pthread_mutex_lock(&tq->lock);
-    {
-        size_t n = tq->n++;
-        if (n)
-            tq->v[n - 1].nsec = timer_get();
-
-        timer_disable();
-        sink(tq->v, n, tm);
-        timer_enable(tq->v[n]);
-    }
-    pthread_mutex_unlock(&tq->lock);
+    bt_eventloop_register(tq->eloop, tq->timerfd, &tq->emitter);
 
     return 0;
 }
 
-struct bt_timer
-bt_tqueue_remove(BT_TQueue tq)
+local int
+timerqueue_disarm(BT_TimerQueue *tq)
 {
-    struct bt_timer tm;
-    assert(tq);
-    timer_disable();
-    pthread_mutex_lock(&tq->lock);
-    tm = tq->v[--tq->n];
-    pthread_mutex_unlock(&tq->lock);
-    return tm;
+    if  (!tq->ntimers)
+        return 0;
+
+    const int ec = bt_eventloop_unregister(tq->eloop, tq->timerfd, &tq->emitter);
+    if (ec < 0) {
+        perror("unregister()");
+        return -1;
+    }
+
+    struct itimerspec rem;
+    if (timerqueue_getrem(tq, &rem) < 0) {
+        return -1;
+    }
+
+    tq->queue[0]->value = rem;
 }
 
-void *
-bt_timerthread(BT_TQueue q)
+local BT_Timer
+pop(BT_Timer v[], size_t n)
 {
-    assert(q);
-    uint8 x;
-    if (pipe(pipefd) < 0)
-        return NULL;
-    while (1) {
-        pause();
-        if (got_alarm) {
-            pthread_mutex_lock(&q->lock);
-            timer_disable();
-            struct bt_timer tm = q->v[--q->n];
-            tm.handler(tm.data);
-            got_alarm = 0;
-            if (q->n)
-                timer_enable(q->v[q->n - 1]);
-            pthread_mutex_unlock(&q->lock);
+    BT_Timer front = v[0];
+    memmove(v, v+1, sizeof(BT_Timer [n-1]));
+    return front;
+}
+
+local int
+timer_fire(BT_EventProducer *prod, BT_EventQueue *queue)
+{
+    BT_TimerQueue *this = container_of(prod, struct bt_timerqueue, emitter);
+
+    timerqueue_disarm(this);
+    BT_Timer front = pop(this->queue, this->ntimers--);
+    bt_eventqueue_push(queue, front->payload);
+    timerqueue_arm(this);
+
+    return true;
+}
+
+#define NSEC (1000000000ULL)
+
+local int
+timer_cmp(BT_Timer a, BT_Timer b)
+{
+    uint64 totala = a->value.it_value.tv_sec * NSEC + a->value.it_value.tv_nsec;
+    uint64 totalb = b->value.it_value.tv_sec * NSEC + b->value.it_value.tv_nsec;
+    return totala > totalb ? 1 : totala < totalb ? -1 : 0;
+}
+
+local void
+timer_sub(BT_Timer a, BT_Timer b)
+{
+    uint64 totala = a->value.it_value.tv_sec * NSEC + a->value.it_value.tv_nsec;
+    uint64 totalb = b->value.it_value.tv_sec * NSEC + b->value.it_value.tv_nsec;
+    uint64 diff = totala - totalb;
+    a->value.it_value = (struct timespec) {
+        .tv_sec = diff / NSEC,
+        .tv_nsec = diff % NSEC,
+    };
+}
+
+local void
+timer_add(BT_Timer a, BT_Timer b)
+{
+    uint64 totala = a->value.it_value.tv_sec * NSEC + a->value.it_value.tv_nsec;
+    uint64 totalb = b->value.it_value.tv_sec * NSEC + b->value.it_value.tv_nsec;
+    uint64 sum = totala + totalb;
+    a->value.it_value = (struct timespec) {
+        .tv_sec = sum / NSEC,
+        .tv_nsec = sum % NSEC,
+    };
+}
+
+local void
+sink(BT_Timer timer, BT_Timer v[], size_t n)
+{
+    size_t i = 0;
+
+    while (i < n) {
+        if (timer_cmp(timer, v[i]) < 0) {
+            timer_sub(v[i], timer);
+            break;
+        } else {
+            timer_sub(timer, v[i]);
         }
+        i = i + 1;
     }
-    return NULL;
+
+    memmove(v+i+1, v+i, sizeof(BT_Timer [n-i]));
+    v[i] = timer;
+}
+
+BT_Timer
+bt_timerqueue_insert(BT_TimerQueue *tq, BT_Timer timer)
+{
+    assert (tq->ntimers < TIMERQUEUE_CAP);
+
+    timerqueue_disarm(tq);
+    sink(timer, tq->queue, tq->ntimers++);
+    timerqueue_arm(tq);
+
+    return timer;
+}
+
+int bt_timerqueue_init(BT_TimerQueue *tq, BT_EventLoop *eloop)
+{
+    tq->emitter = (BT_EventProducer){.on_read = timer_fire};
+    tq->eloop = eloop;
+    tq->timerfd = timerfd_create(CLOCK_MONOTONIC, 0);
+    if (tq->timerfd < 0) {
+        perror("timerfd_create()");
+        return -1;
+    }
+    tq->ntimers = 0;
+    return 0;
+}
+
+int bt_timerqueue_extend(BT_TimerQueue *tq, BT_Timer timer, int incr)
+{
+    timerqueue_disarm(tq);
+
+    for (size_t i=0; i<tq->ntimers; i++) {
+        if (timer != tq->queue[i])
+            continue;
+
+        struct bt_timer old = *timer;
+        timer->value.it_value.tv_sec += incr;
+
+        if (tq->ntimers - i - 1) {
+            pop(tq->queue + i, tq->ntimers - i);
+            timer_add(tq->queue[i], &old);
+            sink(timer, tq->queue+i, tq->ntimers - 1 - i);
+        }
+
+        break;
+    }
+
+    timerqueue_arm(tq);
+    return 0;
 }

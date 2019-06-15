@@ -46,7 +46,10 @@ bt_eventqueue_pop(BT_EventQueue *queue, struct bt_event *e)
         return BT_EVNONE;
     if (queue->qhead >= EVENTQUEUE_MAX)
         queue->qhead = 0;
-    *e = queue->queue[queue->qhead++];
+    const int type = queue->queue[queue->qhead].type;
+    if (e)
+        *e = queue->queue[queue->qhead];
+    ++queue->qhead;
     --queue->n;
-    return e->type;
+    return type;
 }

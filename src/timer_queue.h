@@ -1,28 +1,34 @@
-#ifndef TIMER_QUEUE_H_
-#define TIMER_QUEUE_H_
+#pragma once
 
-#include <signal.h>
-typedef struct bt_tqueue *BT_TQueue;
+#include <time.h>
+#include "eventloop.h"
+#include "event.h"
+
+#define TIMERQUEUE_CAP 128
+#define TIMER(v,e) ((struct bt_timer){\
+        {.it_value = {                \
+            .tv_sec = (v),            \
+            .tv_nsec = 0,             \
+        }}, (e)})
+
+typedef struct bt_timerqueue BT_TimerQueue;
+typedef struct bt_timer *BT_Timer;
 
 struct bt_timer {
-    unsigned nsec;
-    void *data;
-    void (*handler)(void *data);
+    struct itimerspec value;
+    BT_Event payload;
 };
 
-#define BT_TIMER(sec, d, act) \
-    ((struct bt_timer){(sec), (d), (void (*)(void *))(act)})
+struct bt_timerqueue {
+    struct bt_eventproducer emitter;
+    BT_EventLoop *eloop;
 
-BT_TQueue
-bt_tqueue_new(size_t cap);
+    int timerfd;
 
-int
-bt_tqueue_insert(BT_TQueue tq, struct bt_timer tm);
+    BT_Timer queue[TIMERQUEUE_CAP];
+    size_t ntimers;
+};
 
-struct bt_timer
-bt_tqueue_remove(BT_TQueue tq);
-
-void *
-bt_timerthread(BT_TQueue tq);
-
-#endif
+int bt_timerqueue_init(BT_TimerQueue *tq, BT_EventLoop *eloop);
+BT_Timer bt_timerqueue_insert(BT_TimerQueue *tq, BT_Timer timer);
+int bt_timerqueue_extend(BT_TimerQueue *tq, BT_Timer timer, int value);

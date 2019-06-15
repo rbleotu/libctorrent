@@ -51,7 +51,7 @@ bt_eventloop_register(BT_EventLoop *loop, int fd, BT_EventProducer *prod)
     };
 
     if (epoll_ctl(loop->epollfd, EPOLL_CTL_ADD, fd, &ev) == -1) {
-        perror("epoll_ctl: listen_sock");
+        perror("epoll_ctl:");
         exit(EXIT_FAILURE);
     }
 

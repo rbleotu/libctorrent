@@ -28,6 +28,8 @@ enum {
     BT_EVPAUSE,
 };
 
+typedef struct bt_event BT_Event;
+
 struct bt_event {
     int type;
 

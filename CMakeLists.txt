@@ -25,7 +25,6 @@ target_sources (ctorrent
         src/disk.c
         src/message.c
         src/thread_msg.c
-        src/timer_queue.c
         src/piece.c
         src/pqueue.c
         src/torrent.c
@@ -35,6 +34,7 @@ target_sources (ctorrent
         src/eventloop.c
         src/peer.c
         src/peerserver.c
+        src/timer_queue.c
 )
 
 add_executable (tget)
