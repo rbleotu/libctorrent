@@ -1,8 +1,9 @@
 #ifndef TORRENT_H_
 #define TORRENT_H_
 
-#include <error.h>
-#include <util/logger.h>
+#include "util/error.h"
+#include "util/logger.h"
+#include "event.h"
 
 #define MAX_TRACKERS 256
 typedef struct bt_torrent *BT_Torrent;
@@ -29,27 +30,14 @@ struct bt_settings {
 
 typedef struct bt_settings *BT_Settings;
 
-extern BT_Torrent
-bt_torrent_new(BT_Settings settings);
+extern BT_Torrent bt_torrent_new(BT_Settings settings);
+extern int bt_torrent_start(BT_Torrent t);
+extern int bt_torrent_check(BT_Torrent t);
+extern int bt_torrent_tracker_request(BT_Torrent t, unsigned npeer);
+extern int bt_torrent_pause(BT_Torrent t);
+extern void bt_torrent_free(BT_Torrent t);
+extern void bt_torrent_add_action(BT_Torrent t, int ev, int (*cb)());
+extern unsigned bt_torrent_get_nhave(BT_Torrent t);
+extern double bt_torrent_progress(BT_Torrent t);
 
-extern int
-bt_torrent_start(BT_Torrent t);
-
-extern int
-bt_torrent_check(BT_Torrent t);
-
-extern int
-bt_torrent_tracker_request(BT_Torrent t, unsigned npeer);
-
-extern int
-bt_torrent_pause(BT_Torrent t);
-
-extern void
-bt_torrent_free(BT_Torrent t);
-
-extern void
-bt_torrent_add_action(BT_Torrent t, int ev, void *h);
-
-extern unsigned
-bt_torrent_get_nhave(BT_Torrent t);
 #endif

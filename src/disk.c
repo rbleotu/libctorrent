@@ -52,23 +52,6 @@ alias_error:
     return -1;
 }
 
-local int
-get_file(struct bt_file *f, char *path)
-{
-    if (make_dir_tree(path) < 0)
-        return -1;
-
-    int fd = open(path, O_RDWR | O_CREAT, 0664);
-    if (fd < 0) {
-        bt_errno = BT_EOPEN;
-        return -1;
-    }
-
-    f->path = path;
-    f->fd = fd;
-    return 0;
-}
-
 local void
 file_set_pos(struct bt_file *file, uint64 pos)
 {
@@ -88,6 +71,10 @@ bt_disk_add_file(BT_DiskMgr *m, char *path, uint64 sz)
         .fd = -1,
         .pos = 0,
     };
+
+    if (make_dir_tree(path) < 0) {
+        return -1;
+    }
 
     if (vector_pushback(&m->files, file) < 0) {
         perror("malloc");

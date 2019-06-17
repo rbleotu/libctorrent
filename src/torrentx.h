@@ -9,6 +9,9 @@
 #include "peer.h"
 #include "eventqueue.h"
 #include "timer_queue.h"
+#include "util/vector.h"
+
+VECTOR_DEFINE(struct bt_peer, Peer);
 
 #define MAX_UNCHOKED 10
 #define UNCHOKE_DT   20
@@ -37,6 +40,10 @@ struct bt_torrent {
 
     struct bt_eventqueue evqueue;
     struct bt_timerqueue tmqueue;
+
+    int (*ev_callbacks[BT_EVENT_COUNT])();
+
+    Vector(Peer) peers;
 
     struct bt_piece piecetab[];
 };

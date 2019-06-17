@@ -86,7 +86,7 @@ msg2event(int id)
     case BT_MSG_HANDSHAKE:
         return BT_EVPEER_HANDSHAKE;
     default:
-        printf("%d\n", id);
+        printf("message = %d\n", id);
         assert (!"not handled");
     }
     return 0;
@@ -343,7 +343,6 @@ int bt_peer_unchoke(BT_Peer peer)
 
 int bt_peer_keepalive(BT_Peer peer)
 {
-    puts("---- sending keepalive ----");
     struct bt_msg *keepalive = bt_msg_new(BT_MKEEP_ALIVE);
     if (!keepalive) {
         perror("alloc");
@@ -358,10 +357,6 @@ int bt_peer_interested(BT_Peer peer)
 {
     if (peer->am_interested)
         return 0;
-
-    byte ip[4];
-    PUT_U32BE(ip, peer->ipv4);
-    printf("INTERESTED [\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m]\n", ip[0], ip[1], ip[2], ip[3]);
 
     peer->am_interested = true;
     struct bt_msg *interested = bt_msg_new(BT_MINTERESTED);
@@ -425,8 +420,6 @@ int bt_peer_disconnect(BT_Peer peer)
 
 int bt_peer_requestpiece(BT_Peer peer, uint32 pieceid, uint32 start, uint32 len)
 {
-    printf("requesting %u [%u, %u]\n", pieceid, start, len);
-
     struct bt_msg *req = bt_msg_new(BT_MREQUEST, pieceid, start, len);
     if (!req) {
         perror("alloc");
@@ -494,10 +487,6 @@ valid_handshake(BT_Torrent t)
 local int
 peer_onconnect(BT_Torrent t, BT_Peer peer)
 {
-    byte ip[4];
-    PUT_U32BE(ip, peer->ipv4);
-    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] connected\n", ip[0], ip[1], ip[2], ip[3]);
-
     peer->connected = true;
     peer->connect_time = time(NULL);
 
@@ -511,9 +500,6 @@ peer_onconnect(BT_Torrent t, BT_Peer peer)
 local int
 peer_onhandshake(BT_Torrent t, BT_Peer peer, struct bt_handshake *hshk)
 {
-    byte ip[4];
-    PUT_U32BE(ip, peer->ipv4);
-    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] handshake\n", ip[0], ip[1], ip[2], ip[3]);
 
     if (!valid_handshake(t)) {
         bt_peer_disconnect(peer);
@@ -523,18 +509,12 @@ peer_onhandshake(BT_Torrent t, BT_Peer peer, struct bt_handshake *hshk)
     bt_peer_keepalivetimeout(t, peer);
 
     peer->handshake_done = true;
-    puts("... handshake OK!");
-
     return 0;
 }
 
 local int
 peer_oninterested(BT_Torrent t, BT_Peer peer)
 {
-    byte ip[4];
-    PUT_U32BE(ip, peer->ipv4);
-
-    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] interested\n", ip[0], ip[1], ip[2], ip[3]);
     peer->peer_interested = true;
     return 0;
 }
@@ -542,10 +522,6 @@ peer_oninterested(BT_Torrent t, BT_Peer peer)
 local inline int
 peer_onnotinterested(BT_Torrent t, BT_Peer peer)
 {
-    byte ip[4];
-    PUT_U32BE(ip, peer->ipv4);
-
-    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] not interested\n", ip[0], ip[1], ip[2], ip[3]);
     peer->peer_interested = false;
     return 0;
 }
@@ -553,12 +529,7 @@ peer_onnotinterested(BT_Torrent t, BT_Peer peer)
 local inline int
 peer_onchoke(BT_Torrent t, BT_Peer peer)
 {
-    byte ip[4];
-    PUT_U32BE(ip, peer->ipv4);
-
-    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] ---------------choke\n", ip[0], ip[1], ip[2], ip[3]);
     peer->peer_choking = true;
-
     bt_peer_flushreqqueue(t, peer);
     return 0;
 }
@@ -566,23 +537,13 @@ peer_onchoke(BT_Torrent t, BT_Peer peer)
 local inline int
 peer_onunchoke(BT_Torrent t, BT_Peer peer)
 {
-    byte ip[4];
-    PUT_U32BE(ip, peer->ipv4);
-
-    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] UNCHOKE\n", ip[0], ip[1], ip[2], ip[3]);
     peer->peer_choking = false;
-
-done:
     return 0;
 }
 
 local int
 peer_onkeepalive(BT_Torrent t, BT_Peer peer)
 {
-    byte ip[4];
-    PUT_U32BE(ip, peer->ipv4);
-
-    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] keepalive\n", ip[0], ip[1], ip[2], ip[3]);
     return 0;
 }
 
@@ -601,13 +562,6 @@ peer_onhave(BT_Torrent t, BT_Peer peer, size_t piecei)
 local int
 peer_ondisconnect(BT_Torrent t, BT_Peer peer)
 {
-    if (peer->connected) {
-        byte ip[4];
-        PUT_U32BE(ip, peer->ipv4);
-
-        printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] disconnect\n", ip[0], ip[1], ip[2], ip[3]);
-    }
-
     if (peer->handshake_done) {
         for (size_t i=0; i<t->npieces; i++) {
             if (bt_bitset_get(peer->pieces, i)) {
@@ -625,11 +579,6 @@ peer_ondisconnect(BT_Torrent t, BT_Peer peer)
 local int
 peer_onbitfield(BT_Torrent t, BT_Peer peer, byte set[], size_t n)
 {
-    byte ip[4];
-    PUT_U32BE(ip, peer->ipv4);
-
-    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] bitfield\n", ip[0], ip[1], ip[2], ip[3]);
-
     bt_bitset_read_arr(peer->pieces, set, n);
     for (size_t i=0; i<t->npieces; i++) {
         if (bt_bitset_get(peer->pieces, i)) {
@@ -664,12 +613,6 @@ bt_peer_removerequest(BT_Peer peer, uint32 piece, uint32 block)
 local int
 peer_onpiece(BT_Torrent t, BT_Peer peer, const byte data[], uint32 index, uint32 off, uint32 len)
 {
-    byte ip[4];
-    PUT_U32BE(ip, peer->ipv4);
-
-    printf("[\033[31;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] ", ip[0], ip[1], ip[2], ip[3]);
-    printf("got piece: %u %u %u\n", index, off, len);
-
     BT_Piece piece = bt_torrent_get_piece(t, index);
     uint32 block = bt_piece_blockfromoff(off);
 
@@ -680,26 +623,10 @@ peer_onpiece(BT_Torrent t, BT_Peer peer, const byte data[], uint32 index, uint32
         bt_peer_requesttimeout(t, peer);
 
     peer->uploaded += len;
-    printf("ulrate: \033[34;1m%.2f KiB/s\033[0m\n", bt_peer_ulrate(peer)/1024.);
 
     if (bt_piece_complete(piece)) {
         bt_torrent_piece_completed(t, piece);
     }
-
-    printf("piece %d progress = %.2lf\n", index, bt_piece_progress(piece));
-
-    //byte *buf = bt_piececache_alloc(piece, off, len);
-    //if (!buf) {
-    //    perror("cache read()");
-    //    return -1;
-    //}
-
-    //memcpy(buf, data, len);
-    //bt_piececache_markdirty(piece, off, len);
-
-    //if (bt_piececache_complete(piece)) {
-    //    bt_piececache_flush(piece);
-    //}
 
     return 0;
 }
@@ -734,11 +661,11 @@ dispatch(int ev, BT_Torrent t, BT_Peer peer, void *data)
             //bt_peer_keepalivetimeout(t, peer);
             break;
         case BT_EVPEER_REQTIMEOUT:
-            puts("---- REQUEST TIMEOUT ----");
+            //puts("---- REQUEST TIMEOUT ----");
             bt_peer_flushreqqueue(t, peer);
             break;
         case BT_EVPEER_RUNSCHEDULER:
-            puts("<<<< cooldown ran out");
+            //puts("<<<< cooldown ran out");
             bt_peer_updaterequests(t, peer);
             break;
         default:
@@ -826,7 +753,6 @@ int bt_peer_updaterequests(BT_Torrent t, BT_Peer peer)
 {
     const int dt = time(NULL) - peer->last_request;
     if (dt < REQUEST_COOLDOWN) {
-        puts("coolddown...");
         peer_cooldown_timer(t, peer, REQUEST_COOLDOWN - dt);
         return 0;
     }
@@ -844,7 +770,7 @@ int bt_peer_updaterequests(BT_Torrent t, BT_Peer peer)
                 bt_peer_addrequest(peer, piece - t->piecetab, block,
                         bt_piece_blockoffset(piece, block), bt_piece_blocklength(piece, block));
 
-                if (peer->nrequests >= 256) {
+                if (peer->nrequests >= 320) {
                     peer->last_request = time(NULL);
                     bt_peer_requesttimeout(t, peer);
                     goto done;

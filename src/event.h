@@ -30,6 +30,8 @@ enum {
     BT_EVSEND_KEEPALIVE,
 
     BT_EVPAUSE,
+
+    BT_EVENT_COUNT,
 };
 
 typedef struct bt_event BT_Event;

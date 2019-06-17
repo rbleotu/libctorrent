@@ -20,8 +20,6 @@
 #include "util/vector.h"
 #include "peer.h"
 
-VECTOR_DEFINE(struct bt_peer, Peer);
-
 local inline unsigned
 hex_value(char h)
 {
@@ -60,6 +58,9 @@ bt_torrent_alloc(void)
     t->piece_length = 0;
     t->nhave = 0;
     t->size = 0;
+    for (int i=0; i<BT_EVENT_COUNT; i++)
+        t->ev_callbacks[i] = NULL;
+    t->peers = (Vector(Peer)) VECTOR();
     bt_disk_init(&t->mgr);
     return t;
 }
@@ -379,8 +380,11 @@ alloc_error:
 }
 
 extern void
-bt_torrent_add_action(BT_Torrent t, int ev, void *h)
+bt_torrent_add_action(BT_Torrent t, int ev, int (*cb)())
 {
+    assert (ev >= 0);
+    assert (ev < BT_EVENT_COUNT);
+    t->ev_callbacks[ev] = cb;
 }
 
 local void
@@ -460,8 +464,7 @@ bt_torrent_announce_have(BT_Torrent t, uint32 pieceid, Vector(Peer) *v)
     }
 }
 
-local double
-bt_torrent_progress(BT_Torrent t)
+double bt_torrent_progress(BT_Torrent t)
 {
     uint64 have = 0;
 
@@ -487,6 +490,14 @@ count_connected(Vector(Peer) *v)
     return connected;
 }
 
+local int
+dispatch_evcallback(int event, BT_Torrent t, void *data)
+{
+    if (t->ev_callbacks[event])
+        return t->ev_callbacks[event](t, data);
+    return 0;
+}
+
 extern int
 bt_torrent_start(BT_Torrent t)
 {
@@ -500,18 +511,16 @@ bt_torrent_start(BT_Torrent t)
     bt_eventloop_init(&eloop);
 
     const size_t npeer = MIN(t->naddr, t->naddr);
-
-    Vector(Peer) vp = VECTOR();
-    if (vector_resizex(Peer)(&vp, npeer)) {
+    if (vector_resizex(Peer)(&t->peers, npeer)) {
         bt_errno = BT_EALLOC;
         return -1;
     }
 
-    vp.n = npeer;
+    t->peers.n = npeer;
 
     for (size_t i=0; i<npeer; i++) {
-        bt_peer_init(&vp.data[i], &eloop, t->npieces);
-        bt_peer_connect(&vp.data[i], t->addrtab[i].ipv4, t->addrtab[i].port);
+        bt_peer_init(&t->peers.data[i], &eloop, t->npieces);
+        bt_peer_connect(&t->peers.data[i], t->addrtab[i].ipv4, t->addrtab[i].port);
     }
 
     struct bt_event ev;
@@ -529,23 +538,18 @@ bt_torrent_start(BT_Torrent t)
             bt_eventqueue_pop(&t->evqueue, &ev);
 
             if (ev.type == BT_EVPIECE_COMPLETE) {
-                puts("--- completed ---");
                 BT_Piece piece = ev.a;
                 uint32 i = piece - t->piecetab;
-                bt_torrent_announce_have(t, i, &vp);
-                printf("........  Done: %.2lf\n", 100. * bt_torrent_progress(t));
+                bt_torrent_announce_have(t, i, &t->peers);
             } else if (ev.a) {
                 bt_peer_handlemessage(t, ev.a, ev.type, ev.b);
                 bt_peer_updaterequests(t, ev.a);
             }
+
+            dispatch_evcallback(ev.type, t, ev.a);
         }
 
-        printf("connected = %d\n", count_connected(&vp));
-
-        bt_markinterest(t, &vp);
-
-        //if (should_run_chokealgo(t))
-        //    bt_chokealgo(t, &vp);
+        bt_markinterest(t, &t->peers);
     }
 
     return 0;

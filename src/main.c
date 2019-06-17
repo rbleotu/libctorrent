@@ -7,13 +7,54 @@
 #include <stdarg.h>
 #include <time.h>
 
-#include <torrent.h>
+#include "util/common.h"
+#include "util/vector.h"
+#include "torrentx.h"
+#include "torrent.h"
+#include "peer.h"
 
 static void
-piece_received(BT_Torrent t)
+print_peer_stats(BT_Torrent t, BT_Peer peer)
 {
-    puts("received a piece");
-    bt_torrent_pause(t);
+    byte ip[4];
+    PUT_U32BE(ip, peer->ipv4);
+    printf("\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m\t\t", ip[0], ip[1], ip[2], ip[3]);
+    printf("%-8.2lf\t\t", 100. * bt_peer_progress(t, peer));
+    printf("%-12zu\t\t", peer->pieceshas.n);
+    printf("\033[31;1m%-2.2lf\033[0m\t\t", bt_peer_dlrate(peer) / 1024.);
+    printf("\033[34;1m%8.2lf\033[0m\t\t", bt_peer_ulrate(peer) / 1024.);
+    printf("%-8zu\t", peer->nrequests);
+    printf("%2d%d%d%d", peer->am_interested, peer->am_choking, peer->peer_interested, peer->peer_choking);
+    putc('\n', stdout);
+}
+
+static inline void ansi_cursor_up(int n) { printf("\033[%dA", n);}
+
+static int
+piece_received(BT_Torrent t, BT_Peer peer)
+{
+    static time_t tlast;
+    time_t now = time(NULL);
+    if (now - tlast < 1)
+        return 0;
+
+    printf("\033[2J");
+    printf("\033[H");
+    printf("peer (ipv4)\t\tcompleted (%)\t\tnpieces\t\tulrate (KiB/s)\t\tdlrate (KiB/s)\t\tenqued req\tstate\n");
+    int nlines = 0;
+
+    VECTOR_FOREACH(&t->peers, i, struct bt_peer) {
+        if (i->connected) {
+            print_peer_stats(t, i);
+            nlines++;
+        }
+    }
+
+    puts("-------------------------------------");
+    //ansi_cursor_up(nlines + 2);
+
+    tlast = now;
+    return 0;
 }
 
 static char *
@@ -61,9 +102,9 @@ cli_logger(int type, const char *fmt, ...)
 static const struct bt_settings DEFAULT_SETTINGS = {
     .logger        = {cli_logger},
     .metainfo_path = NULL,
-    .port      = 1221,
-    .outdir    = ".",
-    .max_peers = 32,
+    .port          = 1221,
+    .outdir        = ".",
+    .max_peers     = 32,
 };
 
 int
@@ -97,8 +138,7 @@ main(int argc, char *argv[])
 
     printf("got %u peers\n", peer);
 
-
-    // bt_torrent_add_action(t, BT_EVENT_GOTPIECE, NULL);
+    bt_torrent_add_action(t, BT_EVPEER_PIECE, piece_received);
 
     int status;
 
