@@ -32,3 +32,5 @@ struct bt_timerqueue {
 int bt_timerqueue_init(BT_TimerQueue *tq, BT_EventLoop *eloop);
 BT_Timer bt_timerqueue_insert(BT_TimerQueue *tq, BT_Timer timer);
 int bt_timerqueue_extend(BT_TimerQueue *tq, BT_Timer timer, int value);
+int bt_timerqueue_remove(BT_TimerQueue *tq, BT_Timer timer);
+

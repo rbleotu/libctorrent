@@ -15,7 +15,7 @@
 #include "event.h"
 #include "eventloop.h"
 
-#define MAX_EVENTS 16
+#define MAX_EVENTS 256
 
 int
 bt_eventloop_init(BT_EventLoop *loop)
@@ -45,10 +45,14 @@ bt_eventloop_register(BT_EventLoop *loop, int fd, BT_EventProducer *prod)
         return -1;
     }
 
-    struct epoll_event ev = {
-        .events = (prod->on_read ? EPOLLIN : 0) | (prod->on_write ? EPOLLOUT : 0),
-        .data.ptr = prod,
-    };
+    int flags = 0;
+    if (prod->on_read)
+        flags |= EPOLLIN;
+    if (prod->on_write)
+        flags |= EPOLLOUT;
+    assert (flags != 0);
+
+    struct epoll_event ev = {.events = flags, .data.ptr = prod,};
 
     if (epoll_ctl(loop->epollfd, EPOLL_CTL_ADD, fd, &ev) == -1) {
         perror("epoll_ctl:");
@@ -62,48 +66,43 @@ int
 bt_eventloop_run(BT_EventQueue *queue, BT_EventLoop *loop)
 {
     struct epoll_event events[MAX_EVENTS];
-    struct bt_event ev;
-    int pushed = 0;
-    int ret;
+    int err = 0;
 
-    while (!pushed) {
-        const int nfds = epoll_wait(loop->epollfd, events, MAX_EVENTS, -1);
-        if (nfds == -1) {
+    while (bt_eventqueue_isempty(queue)) {
+        const int n = epoll_wait(loop->epollfd, events, MAX_EVENTS, -1);
+        if (n == -1) {
             perror("epoll_wait");
             return -1;
         }
 
-        for (int n = 0; n < nfds; ++n) {
-            BT_EventProducer *prod = events[n].data.ptr;
+        for (int i = 0; i < n; ++i) {
+            BT_EventProducer *prod = events[i].data.ptr;
             assert (prod != NULL);
 
-            if (events[n].events & EPOLLERR) {
+            if (events[i].events & (EPOLLERR | EPOLLHUP)) {
                 if (prod->on_destroy) {
-                    ret = prod->on_destroy(prod, queue);
-                    if (ret < 0) {
+                    err = prod->on_destroy(prod, queue);
+                    if (err < 0) {
                         perror("error ocurred");
                     }
-                    pushed += ret;
                 }
             }
 
-            if (events[n].events & EPOLLIN) {
-                if ((ret = prod->on_read(prod, queue)) < 0) {
+            if (events[i].events & EPOLLIN) {
+                if ((err = prod->on_read(prod, queue)) < 0) {
                     perror("read()");
                 }
-                pushed += ret;
             }
 
-            if (events[n].events & EPOLLOUT) {
-                if ((ret = prod->on_write(prod, queue)) < 0) {
+            if (events[i].events & EPOLLOUT) {
+                if ((err = prod->on_write(prod, queue)) < 0) {
                     perror("write()");
                 }
-                pushed += ret;
             }
         }
     }
 
-    return pushed;
+    return err;
 }
 
 int bt_eventloop_destroy(BT_EventLoop *loop)
@@ -128,4 +127,24 @@ remove:
     epoll_ctl(loop->epollfd, EPOLL_CTL_DEL, fd, NULL);
     vector_remove(&loop->emitters, i);
     return true;
+}
+
+int bt_eventloop_oneshot(BT_EventLoop *loop, int fd, BT_EventProducer *prod)
+{
+    assert (loop != NULL);
+    assert (fd != -1);
+
+    int flags = EPOLLONESHOT;
+    if (prod->on_read)
+        flags |= EPOLLIN;
+    if (prod->on_write)
+        flags |= EPOLLOUT;
+
+    struct epoll_event ev = {.events = flags, .data.ptr = prod,};
+    if (epoll_ctl(loop->epollfd, EPOLL_CTL_MOD, fd, &ev) == -1) {
+        perror("epoll_ctl:");
+        exit(EXIT_FAILURE);
+    }
+
+    return 0;
 }

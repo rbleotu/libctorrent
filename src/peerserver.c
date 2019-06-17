@@ -12,7 +12,7 @@
 #include "peer.h"
 #include "../include/torrent.h"
 
-int on_accept(BT_EventProducer *prod, struct bt_event *out)
+int on_accept(BT_EventProducer *prod, BT_EventQueue *queue)
 {
     BT_PeerServer *this = container_of(prod, struct bt_peerserver, emitter);
 
@@ -27,10 +27,7 @@ int on_accept(BT_EventProducer *prod, struct bt_event *out)
         return -1;
     }
 
-    peer->connected = true;
-
-    out->a = peer;
-    return out->type = BT_EVPEER_CONNECT;
+    bt_eventqueue_push(queue, BT_EVENT(BT_EVPEER_CONNECT, peer, NULL));
 }
 
 int bt_peerserver_init(struct bt_peerserver *server, BT_EventLoop *eloop, uint16 port)

@@ -68,8 +68,9 @@ ssize_t net_tcp_send(int sockfd, const void *data, size_t sz)
         if (n <= 0) {
             if (errno == EINTR)
                 continue;
-            if (errno == EWOULDBLOCK)
+            if (errno == EWOULDBLOCK) {
                 break;
+            }
             return -1;
         }
         sz -= n, data = (byte *)data + n;
@@ -110,6 +111,9 @@ int net_tcp_haserror(int sockfd)
         perror("getsockopt");
         return -1;
     }
+
+    if (retval == EAGAIN)
+        return 0;
 
     return retval;
 }

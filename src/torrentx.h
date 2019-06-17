@@ -8,6 +8,7 @@
 #include "util/common.h"
 #include "peer.h"
 #include "eventqueue.h"
+#include "timer_queue.h"
 
 #define MAX_UNCHOKED 10
 #define UNCHOKE_DT   20
@@ -35,6 +36,7 @@ struct bt_torrent {
     int nwant;
 
     struct bt_eventqueue evqueue;
+    struct bt_timerqueue tmqueue;
 
     struct bt_piece piecetab[];
 };

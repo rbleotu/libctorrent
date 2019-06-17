@@ -90,7 +90,7 @@ main(int argc, char *argv[])
 
     unsigned peer;
 
-    if ((peer = bt_torrent_tracker_request(t, 20)) == 0) {
+    if ((peer = bt_torrent_tracker_request(t, 50)) == 0) {
         fputs("No tracker could be contacted\n", stderr);
         return 1;
     }

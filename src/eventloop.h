@@ -23,5 +23,7 @@ struct bt_eventloop {
 int bt_eventloop_init(BT_EventLoop *loop);
 int bt_eventloop_run(BT_EventQueue *queue, BT_EventLoop *loop);
 int bt_eventloop_register(BT_EventLoop *loop, int fd, BT_EventProducer *producer);
+int bt_eventloop_oneshot(BT_EventLoop *loop, int fd, BT_EventProducer *producer);
 int bt_eventloop_destroy(BT_EventLoop *loop);
 bool bt_eventloop_unregister(BT_EventLoop *loop, int fd, BT_EventProducer *producer);
+

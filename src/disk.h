@@ -1,24 +1,25 @@
 #pragma once
 
-#include <sys/types.h>
-#include <unistd.h>
+#include "util/vector.h"
 
-typedef struct bt_diskmgr *BT_DiskMgr;
+typedef struct bt_diskmgr BT_DiskMgr;
 
 struct bt_file {
     const char *path;
-    off_t sz, off;
+    uint64 sz;
+    uint64 off;
+    uint64 pos;
     int fd;
 };
 
+VECTOR_DEFINE(struct bt_file, File);
+
 struct bt_diskmgr {
-    size_t nfiles, cap;
-    struct bt_file files[];
+    uint64 total_sz;
+    Vector(File) files;
 };
 
-int
-bt_disk_add_file(IN BT_DiskMgr m, IN char *path, IN off_t sz);
-
-BT_DiskMgr bt_disk_new(size_t n);
-int bt_disk_read_piece(IN BT_DiskMgr m, OUT uint8 data[], IN size_t len, IN off_t off);
-int bt_disk_write_piece(IN BT_DiskMgr m, IN uint8 data[], IN size_t len, IN off_t off);
+void bt_disk_init(BT_DiskMgr *m);
+int bt_disk_add_file(IN BT_DiskMgr *m, char *path, uint64 sz);
+int bt_disk_read(BT_DiskMgr *m, void *data, uint64 base, size_t len);
+int bt_disk_write(BT_DiskMgr *m, const void *data, uint64 base, size_t len);

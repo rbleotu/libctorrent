@@ -45,7 +45,6 @@ timerqueue_arm(BT_TimerQueue *tq)
     }
 
     bt_eventloop_register(tq->eloop, tq->timerfd, &tq->emitter);
-
     return 0;
 }
 
@@ -185,6 +184,26 @@ int bt_timerqueue_extend(BT_TimerQueue *tq, BT_Timer timer, int incr)
             sink(timer, tq->queue+i, tq->ntimers - 1 - i);
         }
 
+        break;
+    }
+
+    timerqueue_arm(tq);
+    return 0;
+}
+
+int bt_timerqueue_remove(BT_TimerQueue *tq, BT_Timer timer)
+{
+    timerqueue_disarm(tq);
+
+    for (size_t i=0; i<tq->ntimers; i++) {
+        if (timer != tq->queue[i])
+            continue;
+        if (tq->ntimers - i - 1) {
+            pop(tq->queue + i, tq->ntimers - i);
+            timer_add(tq->queue[i], timer);
+        }
+
+        tq->ntimers--;
         break;
     }
 

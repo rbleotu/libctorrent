@@ -10,6 +10,8 @@
 #include "net.h"
 #include "../../include/torrent.h"
 #include "peerserver.h"
+#include "eventqueue.h"
+#include "event.h"
 
 #define LOCALHOST ((127<<24) | 1)
 #define PORT      8080
@@ -64,31 +66,37 @@ int main(int argc, char *argv[])
     }
 
     bool running = true;
+    struct bt_eventqueue evqueue;
+    bt_eventqueue_init(&evqueue);
 
     while (running) {
-        //struct bt_event ev;
-        //int evtype = bt_eventloop_run(&eloop, &ev);
+        struct bt_event ev;
+        int evtype = bt_eventloop_run(&evqueue, &eloop);
 
-        //switch (evtype) {
-        //case BT_EVPEER_CONNECT:
-        //    {
-        //        byte info_hash[SHA1_DIGEST_LEN] =
-        //            "\xcf\x5c\x59\x53\x19\xbf\x85\x47\x5a\xce\x0c\xf6\x67\xf4\xf7\xda\x58\xef\xa8\x92";
-        //        byte peer_id[20] = "hello world";
-        //        struct bt_handshake *hsk = bt_handshake(info_hash, peer_id);
-        //        bt_peer_handshake(ev.a, hsk);
-        //    }
-        //    break;
-        //case BT_EVPEER_HANDSHAKE:
-        //    {
+        switch (evtype) {
+        case BT_EVPEER_CONNECT:
+            {
+                byte info_hash[SHA1_DIGEST_LEN] =
+                    "\xcf\x5c\x59\x53\x19\xbf\x85\x47\x5a\xce\x0c\xf6\x67\xf4\xf7\xda\x58\xef\xa8\x92";
+                byte peer_id[20] = "hello world";
+                struct bt_handshake *hsk = bt_handshake(info_hash, peer_id);
+                bt_peer_handshake(ev.a, hsk);
+                ((BT_Peer)ev.a)->connected = true;
+            }
+            break;
+        case BT_EVPEER_HANDSHAKE:
+            {
+                ((BT_Peer)ev.a)->connected = true;
 
-        //    }
-        //    break;
-        //case BT_EVPEER_DISCONNECT:
-        //    puts("disconnected");
-        //    running = false;
-        //    break;
-        //}
+
+
+            }
+            break;
+        case BT_EVPEER_DISCONNECT:
+            puts("disconnected");
+            running = false;
+            break;
+        }
     }
 
     return 0;

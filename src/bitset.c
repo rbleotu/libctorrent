@@ -71,6 +71,28 @@ bt_bitset_read_arr(BT_Bitset s, uint8 v[], size_t sz)
     memcpy(s->bits, v, sz);
 }
 
+size_t
+bt_bitset_next0(BT_Bitset set)
+{
+    size_t i = 0;
+    int j = 32;
+
+    for (; i < set->len; i++) {
+        if (~set->bits[i])
+            break;
+    }
+
+    if (i < set->len) {
+        const uint32 x = set->bits[i];
+        while (j--) {
+            if (!(x & (1 << j)))
+                break;
+        }
+    }
+
+    return (i << 5) | (31 - j);
+}
+
 // int
 // main(int argc, char *argv[])
 //{

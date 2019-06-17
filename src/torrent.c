@@ -60,7 +60,7 @@ bt_torrent_alloc(void)
     t->piece_length = 0;
     t->nhave = 0;
     t->size = 0;
-    t->mgr = NULL;
+    bt_disk_init(&t->mgr);
     return t;
 }
 
@@ -164,7 +164,7 @@ init_pieces(BT_Torrent t, BT_BCode pieces)
             return -1;
         }
 
-        bt_piece_init(i, MIN(rem, plen),*hash_tab);
+        bt_piece_init(i, t->size - rem, MIN(rem, plen),*hash_tab);
         n -= SHA1_DIGEST_LEN, ++hash_tab;
         rem -= i->length;
     }
@@ -253,10 +253,6 @@ from_metainfo_file(BT_Torrent t, const char *path)
 
     t->piece_length = b_num(piece_length);
 
-    t->mgr = bt_disk_new(64);
-    if (!t->mgr)
-        goto error;
-
     if (b_islist(files = bt_bcode_get(info, "files"))) {
         t->size = 0;
         BT_BCode file, path;
@@ -273,7 +269,7 @@ from_metainfo_file(BT_Torrent t, const char *path)
             sz = b_num(bt_bcode_get(file, "length"));
             t->size += sz;
 
-            if (bt_disk_add_file(t->mgr, path_str, sz) < 0)
+            if (bt_disk_add_file(&t->mgr, path_str, sz) < 0)
                 goto error;
         }
     } else {
@@ -284,7 +280,7 @@ from_metainfo_file(BT_Torrent t, const char *path)
 
         log_info(t, "file: %30s size: %8u", b_string(name), sz);
 
-        if (bt_disk_add_file(t->mgr, path, sz) < 0)
+        if (bt_disk_add_file(&t->mgr, path, sz) < 0)
             goto error;
     }
 
@@ -452,70 +448,6 @@ should_run_chokealgo(BT_Torrent t)
     return now - t->last_chokealgo > 1;
 }
 
-local bool
-should_run_piecealgo(BT_Torrent t)
-{
-    return t->nwant == 0;
-}
-
-local int
-bt_piecealgo(BT_Torrent t, BT_Piece v[], int n)
-{
-    int total = 0;
-
-    for (size_t i=0; i<t->npieces; i++) {
-        BT_Piece piece = bt_torrent_get_piece(t, i);
-
-        double score = bt_piece_calcscore(piece);
-        if (score == 0.)
-            continue;
-
-        int j = 0;
-
-        for (;j < total; j++) {
-            double b = bt_piece_calcscore(t->want[j]);
-
-            if (score > b) {
-                BT_Piece tmp = t->want[j];
-                t->want[j] = piece;
-                piece = tmp;
-                score = b;
-            }
-        }
-
-        if (total < n) {
-            t->want[j] = piece;
-            total++;
-        }
-    }
-
-    return total;
-}
-
-local int
-bt_piece_request(BT_Torrent t, BT_Piece want[], size_t n, Vector(Peer) *v)
-{
-    VECTOR_FOREACH(v, peer, struct bt_peer) {
-        if (!peer->handshake_done)
-            continue;
-        if (peer->peer_choking)
-            continue;
-
-        for (size_t i=0; i<n; i++) {
-            BT_Piece piece = want[i];
-            size_t id = piece - t->piecetab;
-
-            if (bt_peer_haspiece(peer, id)) {
-                bt_peer_requestpiecefull(peer, piece, id);
-                want[i] = want[n-1];
-                return n - 1;
-            }
-        }
-    }
-
-    return n;
-}
-
 local void
 bt_torrent_announce_have(BT_Torrent t, uint32 pieceid, Vector(Peer) *v)
 {
@@ -526,6 +458,33 @@ bt_torrent_announce_have(BT_Torrent t, uint32 pieceid, Vector(Peer) *v)
             continue;
         bt_peer_have(peer, pieceid);
     }
+}
+
+local double
+bt_torrent_progress(BT_Torrent t)
+{
+    uint64 have = 0;
+
+    for (size_t i=0; i<t->npieces; i++) {
+        if (bt_piece_complete(&t->piecetab[i]))
+            have += t->piecetab[i].length;
+    }
+
+    return (double) have / t->size;
+}
+
+local int
+count_connected(Vector(Peer) *v)
+{
+    int connected = 0;
+
+    VECTOR_FOREACH(v, peer, struct bt_peer) {
+        if (!peer->handshake_done)
+            continue;
+        connected++;
+    }
+
+    return connected;
 }
 
 extern int
@@ -540,15 +499,17 @@ bt_torrent_start(BT_Torrent t)
     struct bt_eventloop eloop;
     bt_eventloop_init(&eloop);
 
+    const size_t npeer = MIN(t->naddr, t->naddr);
+
     Vector(Peer) vp = VECTOR();
-    if (vector_resizex(Peer)(&vp, t->naddr)) {
+    if (vector_resizex(Peer)(&vp, npeer)) {
         bt_errno = BT_EALLOC;
         return -1;
     }
 
-    vp.n = t->naddr;
+    vp.n = npeer;
 
-    for (size_t i=0; i<t->naddr; i++) {
+    for (size_t i=0; i<npeer; i++) {
         bt_peer_init(&vp.data[i], &eloop, t->npieces);
         bt_peer_connect(&vp.data[i], t->addrtab[i].ipv4, t->addrtab[i].port);
     }
@@ -557,6 +518,7 @@ bt_torrent_start(BT_Torrent t)
     bool running = true;
 
     bt_eventqueue_init(&t->evqueue);
+    bt_timerqueue_init(&t->tmqueue, &eloop);
 
     t->nwant = 0;
 
@@ -571,20 +533,19 @@ bt_torrent_start(BT_Torrent t)
                 BT_Piece piece = ev.a;
                 uint32 i = piece - t->piecetab;
                 bt_torrent_announce_have(t, i, &vp);
+                printf("........  Done: %.2lf\n", 100. * bt_torrent_progress(t));
             } else if (ev.a) {
                 bt_peer_handlemessage(t, ev.a, ev.type, ev.b);
+                bt_peer_updaterequests(t, ev.a);
             }
         }
 
+        printf("connected = %d\n", count_connected(&vp));
+
         bt_markinterest(t, &vp);
 
-        if (should_run_chokealgo(t))
-            bt_chokealgo(t, &vp);
-
-        if (should_run_piecealgo(t))
-            t->nwant = bt_piecealgo(t, t->want, 16);
-
-        t->nwant = bt_piece_request(t, t->want, t->nwant, &vp);
+        //if (should_run_chokealgo(t))
+        //    bt_chokealgo(t, &vp);
     }
 
     return 0;
@@ -600,7 +561,7 @@ bt_torrent_pause(BT_Torrent t)
 extern int
 bt_torrent_check(BT_Torrent t)
 {
-    assert(t && t->mgr);
+    assert(t != NULL);
 
     uint8_t hash[SHA1_DIGEST_LEN];
 

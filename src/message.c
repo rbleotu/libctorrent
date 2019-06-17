@@ -27,6 +27,9 @@ bt_msg_new(int id, ...)
 {
     if (id < BT_MHAVE)
         return &prepared[id];
+    if (id == BT_MKEEP_ALIVE)
+        return &prepared[id];
+
     va_list ap;
     void *res = NULL;
     va_start(ap, id);
@@ -344,6 +347,11 @@ bt_msg_pack(byte dest[], struct bt_msg *msg)
     if (msg->id < BT_MSG_CNT) {
         PUT_U32BE(dest + i, msg->len), i += 4;
         dest[i] = msg->id, i++;
+    }
+
+    if (msg->id == BT_MKEEP_ALIVE) {
+        PUT_U32BE(dest + i, 0), i += 4;
+        return;
     }
 
     if (msg->id < BT_MHAVE)

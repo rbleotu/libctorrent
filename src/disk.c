@@ -17,19 +17,11 @@
 #include "util/error.h"
 #include "disk.h"
 
-local pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
-
-BT_DiskMgr
-bt_disk_new(size_t n)
+void
+bt_disk_init(BT_DiskMgr *m)
 {
-    BT_DiskMgr m = bt_malloc(sizeof(*m) + sizeof(m->files[0]) * n);
-    if (!m) {
-        bt_errno = BT_EALLOC;
-        return NULL;
-    }
-    m->nfiles = 0;
-    m->cap = n;
-    return m;
+    m->total_sz = 0;
+    m->files = (Vector(File)) VECTOR();
 }
 
 local int
@@ -77,32 +69,55 @@ get_file(struct bt_file *f, char *path)
     return 0;
 }
 
-int
-bt_disk_add_file(BT_DiskMgr m, char *path, off_t sz)
+local void
+file_set_pos(struct bt_file *file, uint64 pos)
 {
-    assert(path);
-    assert(m);
-    assert(m->nfiles < m->cap);
+    file->pos = pos;
+}
 
-    size_t n = m->nfiles;
-    m->files[n].sz = sz;
-    m->files[n].off = 0;
-    if (n)
-        m->files[n].off = m->files[n - 1].off + m->files[n - 1].sz;
-    if (get_file(&m->files[n], path) < 0)
+int
+bt_disk_add_file(BT_DiskMgr *m, char *path, uint64 sz)
+{
+    assert(path != NULL);
+    assert(m != NULL);
+
+    struct bt_file file = {
+        .path = path,
+        .sz = sz,
+        .off = m->total_sz,
+        .fd = -1,
+        .pos = 0,
+    };
+
+    if (vector_pushback(&m->files, file) < 0) {
+        perror("malloc");
         return -1;
-    m->nfiles++;
+    }
+
+    m->total_sz += sz;
     return 0;
 }
 
-local size_t
-file_from_offset(struct bt_file v[], size_t n, off_t x)
+local struct bt_file *
+file_from_offset(Vector(File) *v, uint64 off)
 {
     size_t i = 0;
-    while (++i < n)
-        if (v[i].off >= x)
-            break;
-    return i - 1;
+    VECTOR_FOREACH(v, file, struct bt_file) {
+        if (file->off > off) {
+            assert (i != 0);
+            return file - 1;
+        }
+        i = i + 1;
+    }
+
+    if (v->n) {
+        struct bt_file *last = &v->data[v->n-1];
+        if (off < last->off + last->sz) {
+            return last;
+        }
+    }
+
+    return NULL;
 }
 
 local ssize_t
@@ -130,38 +145,45 @@ readn(int fd, void *vptr, size_t n)
 }
 
 int
-bt_disk_read_piece(IN BT_DiskMgr m, uint8 data[], size_t len, off_t off)
+bt_disk_read(BT_DiskMgr *m, void *data, uint64 base, size_t len)
 {
-    assert(m && data);
+    assert (!"not implemented");
+    //assert(m != NULL);
 
-    size_t i = file_from_offset(m->files, m->nfiles, off);
-    ssize_t nread, nxfer;
+    //size_t i = file_from_offset(&m->files, base);
+    //ssize_t nread, nxfer;
 
-    off -= m->files[i].off;
+    //off -= m->files[i].off;
 
-    for (; len; off = 0, i++) {
-        assert(i < m->nfiles);
+    //for (; len; off = 0, i++) {
+    //    assert(i < m->nfiles);
 
-        if (lseek(m->files[i].fd, off, SEEK_SET) == -1) {
-            bt_errno = BT_ELSEEK;
-            return -1;
-        }
+    //    if (lseek(m->files[i].fd, off, SEEK_SET) == -1) {
+    //        bt_errno = BT_ELSEEK;
+    //        return -1;
+    //    }
 
-        size_t fsz = m->files[i].sz - off;
-        nread = MIN(fsz, len);
-        if ((nxfer = readn(m->files[i].fd, data, nread)) < 0) {
-            bt_errno = BT_EREAD;
-            return -1;
-        }
-        if (nxfer < nread) {
-            memset(data + nxfer, 0, nread - nxfer);
-            nread = len;
-        }
+    //    size_t fsz = m->files[i].sz - off;
+    //    nread = MIN(fsz, len);
+    //    if ((nxfer = readn(m->files[i].fd, data, nread)) < 0) {
+    //        bt_errno = BT_EREAD;
+    //        return -1;
+    //    }
+    //    if (nxfer < nread) {
+    //        memset(data + nxfer, 0, nread - nxfer);
+    //        nread = len;
+    //    }
 
-        len -= nread, data += nread;
-    }
+    //    len -= nread, data += nread;
+    //}
 
     return 0;
+}
+
+local int
+alloc_fd(const char *path)
+{
+    return open(path, O_RDWR | O_CREAT, 0764);
 }
 
 local ssize_t
@@ -187,37 +209,71 @@ writen(int fd, const void *vptr, size_t n)
     return (n);
 }
 
-int
-bt_disk_write_piece(IN BT_DiskMgr m, uint8 data[], size_t len, off_t off)
+local ssize_t
+file_write(struct bt_file *file, const void *data, size_t len)
 {
-    assert(m && data);
-
-    size_t i = file_from_offset(m->files, m->nfiles, off);
-    ssize_t nwrite, nxfer;
-    off -= m->files[i].off;
-
-    pthread_mutex_lock(&lock);
-    for (; len; off = 0, i++) {
-        assert(i < m->nfiles);
-
-        if (lseek(m->files[i].fd, off, SEEK_SET) == -1) {
-            bt_errno = BT_ELSEEK;
+    if (file->fd < 0) {
+        file->fd = alloc_fd(file->path);
+        if (file->fd < 0) {
+            perror("open");
             return -1;
         }
-        size_t fsz = m->files[i].sz - off;
-        nwrite = MIN(fsz, len);
-        if ((nxfer = writen(m->files[i].fd, data, nwrite)) < nwrite) {
-            bt_errno = BT_EREAD;
-            return -1;
-        }
-
-        off = 0;
-        len -= nwrite, data += nwrite;
     }
-    pthread_mutex_unlock(&lock);
+
+    off_t foff = lseek(file->fd, file->pos, SEEK_SET);
+    if (foff < 0) {
+        perror("lseek");
+        return -1;
+    }
+
+    len = MIN(len, file->sz - foff);
+    file->pos += len;
+
+    return writen(file->fd, data, len);
+}
+
+int
+filevec_write(struct bt_file *v, size_t n, const void *data, size_t len)
+{
+    while (len) {
+        const ssize_t nxfer = file_write(v, data, len);
+        if (nxfer < 0) {
+            return -1;
+        }
+
+        if (nxfer == 0) {
+            v = v + 1;
+            if (!--n) {
+                break;
+            }
+            file_set_pos(v, 0);
+        }
+
+        data = (byte *)data + nxfer;
+        len -= nxfer;
+    }
 
     return 0;
 }
+
+int
+bt_disk_write(BT_DiskMgr *m, const void *data, uint64 base, size_t len)
+{
+    assert (data != NULL);
+
+    assert (m != NULL);
+
+    struct bt_file *file = file_from_offset(&m->files, base);
+    if (!file) {
+        return -1;
+    }
+
+    file_set_pos(file, base - file->off);
+
+    const size_t remafter = m->files.n - (file - &m->files.data[0]);
+    return filevec_write(file, remafter, data, len);
+}
+
 // int
 // main(int argc, char *argv[])
 //{

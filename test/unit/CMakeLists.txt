@@ -32,3 +32,10 @@ add_test (
     NAME test_timer
     COMMAND $<TARGET_FILE:test_timer>
 )
+
+add_executable (test_disk test_disk.c)
+target_link_libraries (test_disk ctorrent)
+add_test (
+    NAME test_disk
+    COMMAND $<TARGET_FILE:test_disk>
+)

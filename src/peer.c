@@ -3,6 +3,7 @@
 #include <string.h>
 #include <assert.h>
 #include <errno.h>
+#include <time.h>
 
 #include "util/common.h"
 #include "util/error.h"
@@ -21,6 +22,14 @@ queue_push(BT_Peer peer, struct bt_msg *msg)
         peer->qtail = 0;
     peer->txqueue[peer->qtail++] = msg;
     peer->nq++;
+}
+
+local struct bt_msg *
+queue_head(BT_Peer peer)
+{
+    if (peer->qhead >= PEER_TXQCAP)
+        peer->qhead = 0;
+    return peer->txqueue[peer->qhead];
 }
 
 local struct bt_msg *
@@ -74,10 +83,6 @@ msg2event(int id)
         return BT_EVPEER_BITFIELD;
     case BT_MKEEP_ALIVE:
         return BT_EVPEER_KEEPALIVE;
-    case BT_MPORT:
-        return 0;
-    case BT_MCANCEL:
-        return 0;
     case BT_MSG_HANDSHAKE:
         return BT_EVPEER_HANDSHAKE;
     default:
@@ -93,6 +98,22 @@ fill_event(struct bt_event *out, BT_Peer peer, struct bt_msg *msg)
     out->type = msg2event(msg->id);
     out->a = peer;
     out->b = msg;
+}
+
+local void
+bt_peer_keepalivetimeout(BT_Torrent t, BT_Peer peer)
+{
+    bt_timerqueue_remove(&t->tmqueue, &peer->keepalive_timeout);
+    peer->keepalive_timeout = TIMER(10, BT_EVENT(BT_EVSEND_KEEPALIVE, peer, NULL));
+    bt_timerqueue_insert(&t->tmqueue, &peer->keepalive_timeout);
+}
+
+local void
+bt_peer_requesttimeout(BT_Torrent t, BT_Peer peer)
+{
+    bt_timerqueue_remove(&t->tmqueue, &peer->request_timeout);
+    peer->request_timeout = TIMER(4, BT_EVENT(BT_EVPEER_REQTIMEOUT, peer, NULL));
+    bt_timerqueue_insert(&t->tmqueue, &peer->request_timeout);
 }
 
 local int
@@ -142,16 +163,16 @@ on_read(BT_EventProducer *prod, BT_EventQueue *queue)
         return 1;
     }
 
+    size_t i = 0;
+
     do {
         this->rxhave += n;
 
-        while (has_message(this->rxbuf, this->rxhave)) {
-            struct bt_msg *msg = bt_msg_unpack(this->rxbuf);
-
-            memmove(this->rxbuf, this->rxbuf + bt_msg_len(msg), this->rxhave - bt_msg_len(msg));
-            this->rxhave -= bt_msg_len(msg);
-
+        while (has_message(this->rxbuf + i, this->rxhave - i)) {
+            struct bt_msg *msg = bt_msg_unpack(this->rxbuf + i);
             bt_eventqueue_push(queue, BT_EVENT(msg2event(msg->id), this, msg));
+            i += bt_msg_len(msg);
+            goto done;
         }
 
         n = net_tcp_recv(this->sockfd, this->rxbuf + this->rxhave, sizeof(this->rxbuf) - this->rxhave);
@@ -160,6 +181,10 @@ on_read(BT_EventProducer *prod, BT_EventQueue *queue)
             return -1;
         }
     } while(n);
+
+done:
+    memmove(this->rxbuf, this->rxbuf + i, this->rxhave - i);
+    this->rxhave -= i;
 
     return 0;
 }
@@ -176,42 +201,67 @@ local int
 on_write(BT_EventProducer *prod, BT_EventQueue *queue)
 {
     BT_Peer this = container_of(prod, struct bt_peer, evproducer);
-    size_t n;
 
     if (!this->connected) {
         if (net_tcp_haserror(this->sockfd)) {
             perror("net_tcp_haserror");
-            return -1;
+            return 0;
         }
 
         bt_eventqueue_push(queue, BT_EVENT(BT_EVPEER_CONNECT, this, NULL));
-        return 1;
+        return 0;
     }
 
+    size_t n;
+
     do {
-        if (!this->txrem) {
-            if (this->nq) {
-                struct bt_msg *msg = queue_pop(this);
-                bt_msg_pack(this->txbuf, msg);
-
-                this->txrem = bt_msg_len(msg);
-                this->txnext = this->txbuf;
-
-                bt_msg_free(msg);
-            } else {
-                return 0;
-            }
-        }
-
-        n = net_tcp_send(this->sockfd, this->txnext, this->txrem);
+        if (txbuf_isempty(&this->txbuf))
+            if (txbuf_refill(&this->txbuf) < 0)
+                return -1;
+        n = net_tcp_send(this->sockfd, txbuf_next(&this->txbuf), txbuf_left(&this->txbuf));
         if (n < 0) {
-            return -1;
+            perror("write()");
         }
 
-        this->txnext += n;
-        this->txrem -= n;
-    } while (n);
+        this->txbuf.next += n;
+    } while (n > 0);
 
+    return 0;
+}
+
+local int
+txqueue_messages(struct txbuf *buf)
+{
+    BT_Peer this = container_of(buf, struct bt_peer, txbuf);
+    size_t i = 0;
+
+    while (this->nq) {
+        const size_t left = sizeof(buf->buf) - i;
+        struct bt_msg *msg = queue_pop(this);
+
+        switch (msg->id) {
+        case BT_MPIECE:
+            assert (!"not implemented");
+            break;
+        case BT_MBITFIELD:
+            assert (!"not implemented");
+            break;
+        default:
+            if (bt_msg_len(msg) > left) {
+                queue_push(this, msg);
+                goto done;
+            }
+            bt_msg_pack(buf->buf + i, msg);
+            i += bt_msg_len(msg);
+            bt_msg_free(msg);
+            break;
+        }
+    }
+
+    buf->next = buf->buf;
+    buf->end = buf->buf + i;
+
+done:
     return 0;
 }
 
@@ -219,6 +269,11 @@ int bt_peer_init(BT_Peer peer, BT_EventLoop *eloop, size_t npieces)
 {
     assert (peer);
     *peer = PEER_INIT();
+
+    peer->txbuf = (struct txbuf) {
+        .next = NULL, .end = NULL,
+        .request_next = txqueue_messages
+    };
 
     peer->eloop = eloop;
     peer->pieces = bt_bitset_new(npieces);
@@ -265,6 +320,7 @@ int bt_peer_choke(BT_Peer peer)
         bt_errno = BT_EALLOC;
         return -1;
     }
+
     queue_push(peer, choke);
     return 0;
 }
@@ -285,10 +341,27 @@ int bt_peer_unchoke(BT_Peer peer)
     return 0;
 }
 
+int bt_peer_keepalive(BT_Peer peer)
+{
+    puts("---- sending keepalive ----");
+    struct bt_msg *keepalive = bt_msg_new(BT_MKEEP_ALIVE);
+    if (!keepalive) {
+        perror("alloc");
+        bt_errno = BT_EALLOC;
+        return -1;
+    }
+    queue_push(peer, keepalive);
+    return 0;
+}
+
 int bt_peer_interested(BT_Peer peer)
 {
     if (peer->am_interested)
         return 0;
+
+    byte ip[4];
+    PUT_U32BE(ip, peer->ipv4);
+    printf("INTERESTED [\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m]\n", ip[0], ip[1], ip[2], ip[3]);
 
     peer->am_interested = true;
     struct bt_msg *interested = bt_msg_new(BT_MINTERESTED);
@@ -343,6 +416,9 @@ int bt_peer_disconnect(BT_Peer peer)
         net_tcp_disconnect(peer->sockfd);
         peer->sockfd = -1;
     }
+
+    peer->connected = false;
+    peer->handshake_done = false;
 
     return 0;
 }
@@ -423,6 +499,7 @@ peer_onconnect(BT_Torrent t, BT_Peer peer)
     printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] connected\n", ip[0], ip[1], ip[2], ip[3]);
 
     peer->connected = true;
+    peer->connect_time = time(NULL);
 
     byte peer_id[20] = "hello world";
     struct bt_handshake *hshk = bt_handshake(t->info_hash, peer_id);
@@ -443,10 +520,11 @@ peer_onhandshake(BT_Torrent t, BT_Peer peer, struct bt_handshake *hshk)
         return 0;
     }
 
+    bt_peer_keepalivetimeout(t, peer);
+
     peer->handshake_done = true;
     puts("... handshake OK!");
 
-    bt_peer_interested(peer);
     return 0;
 }
 
@@ -478,8 +556,10 @@ peer_onchoke(BT_Torrent t, BT_Peer peer)
     byte ip[4];
     PUT_U32BE(ip, peer->ipv4);
 
-    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] choke\n", ip[0], ip[1], ip[2], ip[3]);
+    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] ---------------choke\n", ip[0], ip[1], ip[2], ip[3]);
     peer->peer_choking = true;
+
+    bt_peer_flushreqqueue(t, peer);
     return 0;
 }
 
@@ -489,9 +569,10 @@ peer_onunchoke(BT_Torrent t, BT_Peer peer)
     byte ip[4];
     PUT_U32BE(ip, peer->ipv4);
 
-    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] unchoke\n", ip[0], ip[1], ip[2], ip[3]);
+    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] UNCHOKE\n", ip[0], ip[1], ip[2], ip[3]);
     peer->peer_choking = false;
 
+done:
     return 0;
 }
 
@@ -508,15 +589,11 @@ peer_onkeepalive(BT_Torrent t, BT_Peer peer)
 local int
 peer_onhave(BT_Torrent t, BT_Peer peer, size_t piecei)
 {
-    byte ip[4];
-    PUT_U32BE(ip, peer->ipv4);
-
-    printf("[\033[34;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] have %zu\n", ip[0], ip[1], ip[2], ip[3], piecei);
-
     bt_bitset_set(peer->pieces, piecei);
 
     BT_Piece piece = bt_torrent_get_piece(t, piecei);
     bt_piece_incrfreq(piece);
+    vector_pushback(&peer->pieceshas, piece);
 
     return 0;
 }
@@ -540,6 +617,7 @@ peer_ondisconnect(BT_Torrent t, BT_Peer peer)
         }
     }
 
+    bt_peer_flushreqqueue(t, peer);
     bt_peer_disconnect(peer);
     return 0;
 }
@@ -557,25 +635,58 @@ peer_onbitfield(BT_Torrent t, BT_Peer peer, byte set[], size_t n)
         if (bt_bitset_get(peer->pieces, i)) {
             BT_Piece piece = bt_torrent_get_piece(t, i);
             bt_piece_incrfreq(piece);
+            vector_pushback(&peer->pieceshas, piece);
         }
     }
 
     return 0;
 }
 
+bool
+bt_peer_removerequest(BT_Peer peer, uint32 piece, uint32 block)
+{
+    uint64 x = ((uint64)piece << 32) | block;
+    const size_t n = peer->nrequests;
+
+    for (size_t i=0; i<n; i++) {
+        if (peer->request_queue[i] == x) {
+            if (n - 1) {
+                peer->request_queue[i] = peer->request_queue[n - 1];
+                peer->nrequests = n - 1;
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 local int
 peer_onpiece(BT_Torrent t, BT_Peer peer, const byte data[], uint32 index, uint32 off, uint32 len)
 {
+    byte ip[4];
+    PUT_U32BE(ip, peer->ipv4);
+
+    printf("[\033[31;1m%3hhu.%3hhu.%3hhu.%3hhu\033[0m] ", ip[0], ip[1], ip[2], ip[3]);
     printf("got piece: %u %u %u\n", index, off, len);
 
     BT_Piece piece = bt_torrent_get_piece(t, index);
-    bt_piece_incrdlrover(piece, len);
+    uint32 block = bt_piece_blockfromoff(off);
+
+    bt_piece_markhave(piece, block);
+    bt_disk_write(&t->mgr, data, piece->off + off, len);
+
+    if (bt_peer_removerequest(peer, index, block))
+        bt_peer_requesttimeout(t, peer);
 
     peer->uploaded += len;
+    printf("ulrate: \033[34;1m%.2f KiB/s\033[0m\n", bt_peer_ulrate(peer)/1024.);
 
     if (bt_piece_complete(piece)) {
         bt_torrent_piece_completed(t, piece);
     }
+
+    printf("piece %d progress = %.2lf\n", index, bt_piece_progress(piece));
 
     //byte *buf = bt_piececache_alloc(piece, off, len);
     //if (!buf) {
@@ -589,6 +700,8 @@ peer_onpiece(BT_Torrent t, BT_Peer peer, const byte data[], uint32 index, uint32
     //if (bt_piececache_complete(piece)) {
     //    bt_piececache_flush(piece);
     //}
+
+    return 0;
 }
 
 local int
@@ -610,10 +723,28 @@ dispatch(int ev, BT_Torrent t, BT_Peer peer, void *data)
         HANDLE_EVENT(t, peer, EVPEER_HAVE, peer_onhave);
         HANDLE_EVENT(t, peer, EVPEER_INTERESTED, peer_oninterested);
         HANDLE_EVENT(t, peer, EVPEER_NOTINTERESTED, peer_onnotinterested);
+        HANDLE_EVENT(t, peer, EVPEER_CHOKE, peer_onchoke);
         HANDLE_EVENT(t, peer, EVPEER_UNCHOKE, peer_onunchoke);
         HANDLE_EVENT(t, peer, EVPEER_KEEPALIVE, peer_onkeepalive);
         HANDLE_EVENT(t, peer, EVPEER_BITFIELD, peer_onbitfield);
         HANDLE_EVENT(t, peer, EVPEER_PIECE, peer_onpiece);
+        HANDLE_EVENT(t, peer, EVPEER_REQUEST, peer_onrequest);
+        case BT_EVSEND_KEEPALIVE:
+            //bt_peer_keepalive(peer);
+            //bt_peer_keepalivetimeout(t, peer);
+            break;
+        case BT_EVPEER_REQTIMEOUT:
+            puts("---- REQUEST TIMEOUT ----");
+            bt_peer_flushreqqueue(t, peer);
+            break;
+        case BT_EVPEER_RUNSCHEDULER:
+            puts("<<<< cooldown ran out");
+            bt_peer_updaterequests(t, peer);
+            break;
+        default:
+            printf("ev = %d\n", ev);
+            assert(!"message not handled");
+            break;
     }
     return 0;
 }
@@ -651,28 +782,91 @@ bt_peer_haspiece(BT_Peer peer, uint32 piecei)
     return bt_bitset_get(peer->pieces, piecei);
 }
 
-uint32 bt_peer_ulrate(BT_Peer peer)
+double bt_peer_ulrate(BT_Peer peer)
 {
     if (!peer)
         return 0;
-    return peer->uploaded;
+    if (!peer->connect_time)
+        return 0;
+    const time_t dt = time(NULL) - peer->connect_time;
+    if (!dt)
+        return 0;
+    return (double)peer->uploaded / dt;
 }
 
-uint32 bt_peer_dlrate(BT_Peer peer)
+double bt_peer_dlrate(BT_Peer peer)
 {
     if (!peer)
         return 0;
-    return peer->downloaded;
+    if (!peer->connect_time)
+        return 0;
+    const time_t dt = time(NULL) - peer->connect_time;
+    if (!dt)
+        return 0;
+    return (double)peer->downloaded / dt;
 }
 
-int bt_peer_requestpiecefull(BT_Peer peer, BT_Piece piece, uint32 id)
+int bt_peer_addrequest(BT_Peer peer, uint32 piecei, uint32 block, uint32 off, uint32 len)
 {
-    bt_piece_mark_downloading(piece);
-    size_t off = piece->dlnext;
+    assert (peer->nrequests < PEER_REQCAP);
+    peer->request_queue[peer->nrequests++] = ((uint64)(piecei) << 32) | block;
 
-    while (off < piece->length) {
-        uint32 n = MIN(1<<14, piece->length - off);
-        bt_peer_requestpiece(peer, id, off, n);
-        off += n;
+    bt_peer_requestpiece(peer, piecei, off, len);
+}
+
+local void
+peer_cooldown_timer(BT_Torrent t, BT_Peer peer, int dt)
+{
+    bt_timerqueue_remove(&t->tmqueue, &peer->cooldown_timer);
+    peer->cooldown_timer = TIMER(dt, BT_EVENT(BT_EVPEER_RUNSCHEDULER, peer, NULL));
+    bt_timerqueue_insert(&t->tmqueue, &peer->cooldown_timer);
+}
+
+int bt_peer_updaterequests(BT_Torrent t, BT_Peer peer)
+{
+    const int dt = time(NULL) - peer->last_request;
+    if (dt < REQUEST_COOLDOWN) {
+        puts("coolddown...");
+        peer_cooldown_timer(t, peer, REQUEST_COOLDOWN - dt);
+        return 0;
     }
+
+    if (peer->am_interested) {
+        VECTOR_FOREACH(&peer->pieceshas, i, BT_Piece) {
+            const BT_Piece piece = *i;
+
+            for (;;) {
+                uint32 block = bt_piece_allocblock(piece);
+                if (block == (uint32)(-1)) {
+                    break;
+                }
+
+                bt_peer_addrequest(peer, piece - t->piecetab, block,
+                        bt_piece_blockoffset(piece, block), bt_piece_blocklength(piece, block));
+
+                if (peer->nrequests >= 256) {
+                    peer->last_request = time(NULL);
+                    bt_peer_requesttimeout(t, peer);
+                    goto done;
+                }
+            }
+        }
+    }
+
+done:
+    return 0;
+}
+
+void bt_peer_flushreqqueue(BT_Torrent t, BT_Peer peer)
+{
+    for (size_t i=0; i<peer->nrequests; i++) {
+        const uint64 x  = peer->request_queue[i];
+        const uint32 pieceid = x >> 32;
+        const uint32 blockid = (uint32)x;
+
+        BT_Piece piece = bt_torrent_get_piece(t, pieceid);
+        bt_piece_unallocblock(piece, blockid);
+    }
+
+    peer->nrequests = 0;
 }
